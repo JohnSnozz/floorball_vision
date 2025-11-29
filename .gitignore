@@ -1,0 +1,49 @@
+# Basketball project (separate project)
+basketball/
+
+# Raw videos (large files)
+raw_videos/
+video_in/
+video_out/
+ytimport/raw_videos/
+ytimport/screenshot_batches/
+ytimport/screenshot_raw/
+
+# YOLO model files (large .pt files)
+*.pt
+
+# Training data (images and labels)
+images/
+labels/
+fb_training_images/
+
+# Training runs/outputs
+runs/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
+.env
+venv/
+ENV/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude Code
+.claude/
+CLAUDE.md
+CLAUDE.local.md

@@ -1,0 +1,45 @@
+{
+  "categories": [
+    {
+      "id": 0,
+      "name": "ball"
+    },
+    {
+      "id": 1,
+      "name": "cornerpoints"
+    },
+    {
+      "id": 2,
+      "name": "goal"
+    },
+    {
+      "id": 3,
+      "name": "goalkeeper"
+    },
+    {
+      "id": 4,
+      "name": "period"
+    },
+    {
+      "id": 5,
+      "name": "player"
+    },
+    {
+      "id": 6,
+      "name": "ref"
+    },
+    {
+      "id": 7,
+      "name": "scoreboard"
+    },
+    {
+      "id": 8,
+      "name": "time"
+    }
+  ],
+  "info": {
+    "year": 2025,
+    "version": "1.0",
+    "contributor": "Label Studio"
+  }
+}
