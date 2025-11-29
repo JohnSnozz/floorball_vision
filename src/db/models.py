@@ -112,10 +112,11 @@ class LabelingProject(Base):
     __tablename__ = "labeling_projects"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    video_id = Column(UUID(as_uuid=True), ForeignKey("videos.id"))
 
     # Label Studio Referenz
     label_studio_id = Column(Integer, unique=True)  # ID in Label Studio
-    name = Column(String(255), nullable=False)
+    title = Column(String(255), nullable=False)
     description = Column(Text)
 
     # Konfiguration
@@ -124,6 +125,7 @@ class LabelingProject(Base):
 
     # Pfade
     images_path = Column(String(500))  # Lokaler Pfad zu Bildern
+    export_path = Column(String(500))  # Pfad zu exportierten Labels
 
     # Statistiken
     total_images = Column(Integer, default=0)
@@ -134,14 +136,50 @@ class LabelingProject(Base):
     min_labels_for_training = Column(Integer, default=100)
 
     # Status
-    status = Column(String(50), default="active")  # active, archived
+    status = Column(String(50), default="created")  # created, labeling, exported, training
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
+    video = relationship("Video", backref="labeling_projects")
+    batches = relationship("LabelingBatch", back_populates="project", cascade="all, delete-orphan")
     training_runs = relationship("TrainingRun", back_populates="labeling_project")
+
+
+class LabelingBatch(Base):
+    """
+    Labeling Batches
+
+    Ein Batch von Frames die zu einem Projekt gehören.
+    """
+    __tablename__ = "labeling_batches"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("labeling_projects.id"), nullable=False)
+
+    # Batch-Info
+    batch_id = Column(String(50), nullable=False)  # Lokale Batch-ID
+    num_frames = Column(Integer, default=0)
+
+    # Pfad zu den Frames
+    frames_path = Column(String(500))
+
+    # Task-IDs in Label Studio (für direktes Öffnen des Batches)
+    task_ids = Column(JSON, default=list)
+
+    # Label Studio View-ID (für gefilterten Tab)
+    view_id = Column(Integer)
+
+    # Status
+    status = Column(String(50), default="created")  # created, uploaded, labeled
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    project = relationship("LabelingProject", back_populates="batches")
 
 
 class TrainingRun(Base):

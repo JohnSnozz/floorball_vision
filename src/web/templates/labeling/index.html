@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+
+{% block title %}Labeling - Floorball Vision{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <h1 class="text-3xl font-bold mb-8">Label Studio Integration</h1>
+
+    <!-- Status Banner -->
+    <div id="ls-status" class="mb-6 p-4 rounded-lg {% if label_studio_status %}bg-green-100 text-green-800{% else %}bg-red-100 text-red-800{% endif %}">
+        <div class="flex items-center">
+            <span class="text-2xl mr-3">{% if label_studio_status %}✓{% else %}✗{% endif %}</span>
+            <div>
+                <strong>Label Studio:</strong>
+                {% if label_studio_status %}
+                    Online - <a href="http://localhost:8080" target="_blank" class="underline">Öffnen</a>
+                {% else %}
+                    Offline - Bitte starten mit: <code class="bg-gray-200 px-2 py-1 rounded">label-studio start --port 8080</code>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <!-- Neues Projekt erstellen -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-xl font-semibold mb-4">Neues Projekt erstellen</h2>
+
+            <form id="create-project-form" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Projekt-Titel</label>
+                    <input type="text" name="title" placeholder="z.B. Training Set November 2025"
+                           class="w-full border rounded-lg px-3 py-2" required>
+                </div>
+
+                <button type="submit" id="create-btn"
+                        class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 disabled:bg-gray-400">
+                    Projekt erstellen
+                </button>
+            </form>
+
+            <p class="text-xs text-gray-500 mt-3">
+                Nach dem Erstellen kannst du Batches aus verschiedenen Videos hinzufügen.
+            </p>
+        </div>
+
+        <!-- Bestehendes Label Studio Projekt verknüpfen -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-xl font-semibold mb-4">Bestehendes Projekt verknüpfen</h2>
+
+            <div id="ls-projects-loading" class="text-gray-500">
+                Lade Label Studio Projekte...
+            </div>
+
+            <div id="ls-projects-list" class="hidden space-y-2">
+                <!-- Wird per JavaScript gefüllt -->
+            </div>
+
+            <div id="ls-projects-error" class="hidden text-red-600">
+                Fehler beim Laden der Projekte
+            </div>
+
+            <p class="text-xs text-gray-500 mt-3">
+                Verknüpfe ein bereits existierendes Label Studio Projekt.
+            </p>
+        </div>
+
+        <!-- Bestehende Projekte -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-xl font-semibold mb-4">Projekte</h2>
+
+            {% if projects %}
+            <div class="space-y-3" id="projects-list">
+                {% for project in projects %}
+                <a href="{{ url_for('labeling.project_detail', project_id=project.id) }}"
+                   class="block border rounded-lg p-4 hover:bg-gray-50 transition">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <h3 class="font-medium">{{ project.title }}</h3>
+                            <p class="text-sm text-gray-500">
+                                {{ project.batches|length }} Batch(es) •
+                                {{ project.batches|sum(attribute='num_frames') or 0 }} Frames
+                            </p>
+                            <p class="text-xs text-gray-400">Status: {{ project.status }}</p>
+                        </div>
+                        <span class="text-gray-400">→</span>
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-gray-500">Noch keine Projekte vorhanden.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Training Section -->
+    <div class="mt-8 bg-white rounded-lg shadow p-6">
+        <h2 class="text-xl font-semibold mb-4">YOLO Training</h2>
+        <p class="text-gray-500 mb-4">
+            Exportiere zuerst Labels aus einem Projekt, dann starte das Training.
+        </p>
+        <a href="{{ url_for('training.index') }}"
+           class="inline-block bg-orange-500 text-white py-2 px-4 rounded hover:bg-orange-600">
+            Zum Training →
+        </a>
+    </div>
+</div>
+
+<script>
+// Label Studio Projekte laden
+async function loadLabelStudioProjects() {
+    const loading = document.getElementById('ls-projects-loading');
+    const list = document.getElementById('ls-projects-list');
+    const error = document.getElementById('ls-projects-error');
+
+    try {
+        const response = await fetch('/labeling/api/label-studio-projects');
+        const projects = await response.json();
+
+        loading.classList.add('hidden');
+
+        if (projects.error) {
+            error.textContent = projects.error;
+            error.classList.remove('hidden');
+            return;
+        }
+
+        if (projects.length === 0) {
+            list.innerHTML = '<p class="text-gray-500">Keine Projekte in Label Studio gefunden.</p>';
+            list.classList.remove('hidden');
+            return;
+        }
+
+        list.innerHTML = projects.map(p => `
+            <div class="border rounded p-3 ${p.linked ? 'bg-gray-100' : 'hover:bg-blue-50'}">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <span class="font-medium">${p.title}</span>
+                        <span class="text-sm text-gray-500 ml-2">(${p.task_count} Tasks)</span>
+                    </div>
+                    ${p.linked
+                        ? '<span class="text-green-600 text-sm">Verknüpft</span>'
+                        : `<button onclick="linkProject(${p.id}, '${p.title.replace(/'/g, "\\'")}')"
+                                  class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600">
+                              Verknüpfen
+                           </button>`
+                    }
+                </div>
+            </div>
+        `).join('');
+        list.classList.remove('hidden');
+
+    } catch (err) {
+        loading.classList.add('hidden');
+        error.textContent = 'Verbindung zu Label Studio fehlgeschlagen';
+        error.classList.remove('hidden');
+    }
+}
+
+// Bestehendes Projekt verknüpfen
+async function linkProject(lsId, title) {
+    try {
+        const response = await fetch('/labeling/api/link-project', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                label_studio_id: lsId,
+                title: title
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            window.location.href = '/labeling/project/' + result.project_id;
+        } else {
+            alert('Fehler: ' + result.error);
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+
+// Beim Laden der Seite
+document.addEventListener('DOMContentLoaded', loadLabelStudioProjects);
+
+// Projekt erstellen
+document.getElementById('create-project-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const form = e.target;
+    const btn = document.getElementById('create-btn');
+    const title = form.title.value.trim();
+
+    if (!title) {
+        alert('Bitte Titel eingeben');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Erstelle...';
+
+    try {
+        const response = await fetch('/labeling/api/create-project', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({title})
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // Zur Projekt-Seite weiterleiten
+            window.location.href = '/labeling/project/' + result.project_id;
+        } else {
+            alert('Fehler: ' + result.error);
+            btn.disabled = false;
+            btn.textContent = 'Projekt erstellen';
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = 'Projekt erstellen';
+    }
+});
+</script>
+{% endblock %}

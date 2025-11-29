@@ -1,12 +1,15 @@
 """
 Celery Tasks
 
-Background Tasks für Video-Verarbeitung.
+Background Tasks für Video-Verarbeitung und Training.
 """
 import os
+import shutil
+from datetime import datetime
+from pathlib import Path
 
 from src.web.extensions import db, celery
-from src.db.models import Video
+from src.db.models import Video, TrainingRun
 
 
 def get_flask_app():
@@ -116,5 +119,82 @@ def process_uploaded_video(video_id: str):
         except Exception as e:
             video.status = "error"
             video.error_message = f"Verarbeitung fehlgeschlagen: {str(e)}"
+            db.session.commit()
+            return {"error": str(e)}
+
+
+@celery.task(bind=True)
+def start_training(self, run_id: str, dataset_paths: list, base_model: str, epochs: int):
+    """
+    YOLO Training starten.
+
+    Args:
+        run_id: TrainingRun UUID
+        dataset_paths: Liste von Pfaden zu exportierten Datasets
+        base_model: Basis-Modell (z.B. yolov8n.pt)
+        epochs: Anzahl Epochs
+    """
+    from src.training.train import train_model
+    from src.labeling.export import YOLOExporter
+
+    app = get_flask_app()
+    with app.app_context():
+        run = db.session.get(TrainingRun, run_id)
+        if not run:
+            return {"error": "Training Run nicht gefunden"}
+
+        try:
+            run.status = "running"
+            run.started_at = datetime.utcnow()
+            db.session.commit()
+
+            # Datasets kombinieren falls mehrere
+            if len(dataset_paths) > 1:
+                exporter = YOLOExporter()
+                merged = exporter.merge_exports(
+                    dataset_paths,
+                    f"training_{run_id[:8]}"
+                )
+                data_yaml = str(Path(merged["path"]) / "data.yaml")
+            else:
+                data_yaml = str(Path(dataset_paths[0]) / "data.yaml")
+
+            # Training starten
+            self.update_state(state="PROGRESS", meta={"stage": "training", "epoch": 0})
+
+            model_path = train_model(
+                data_yaml=data_yaml,
+                model=base_model,
+                epochs=epochs,
+                imgsz=1080,
+                batch=4,
+                project="models/trained",
+                name=run.model_name
+            )
+
+            # Modell an richtigen Ort kopieren
+            final_model_path = f"models/trained/{run.model_name}/best.pt"
+
+            # Metriken aus Training holen (vereinfacht)
+            run.model_path = final_model_path
+            run.status = "completed"
+            run.completed_at = datetime.utcnow()
+
+            # Trainingszeit berechnen
+            if run.started_at:
+                run.training_time = (run.completed_at - run.started_at).total_seconds()
+
+            db.session.commit()
+
+            return {
+                "status": "success",
+                "run_id": run_id,
+                "model_path": final_model_path
+            }
+
+        except Exception as e:
+            run.status = "failed"
+            run.error_message = str(e)
+            run.completed_at = datetime.utcnow()
             db.session.commit()
             return {"error": str(e)}

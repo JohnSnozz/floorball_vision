@@ -1,0 +1,332 @@
+{% extends "base.html" %}
+
+{% block title %}{{ project.title }} - Labeling{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-8">
+        <div>
+            <a href="{{ url_for('labeling.index') }}" class="text-blue-600 hover:underline text-sm">&larr; Zurück</a>
+            <h1 class="text-3xl font-bold mt-2">{{ project.title }}</h1>
+            <p class="text-gray-500">Status: {{ project.status }}</p>
+        </div>
+        <div class="flex space-x-3">
+            <a href="http://localhost:8080/projects/{{ project.label_studio_id }}/data"
+               target="_blank"
+               class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600">
+                Label Studio öffnen
+            </a>
+            <button onclick="exportLabels()"
+                    class="bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600">
+                Labels exportieren
+            </button>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <!-- Batch hinzufügen -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-xl font-semibold mb-4">Batch hinzufügen</h2>
+
+            <form id="add-batch-form" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Video auswählen</label>
+                    <select name="video_id" class="w-full border rounded-lg px-3 py-2" required>
+                        <option value="">-- Video wählen --</option>
+                        {% for video in videos %}
+                        <option value="{{ video.id }}">{{ video.original_filename or video.filename }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Anzahl Frames</label>
+                    <input type="number" name="num_frames" value="100" min="10" max="500"
+                           class="w-full border rounded-lg px-3 py-2">
+                </div>
+
+                <button type="submit" id="add-batch-btn"
+                        class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 disabled:bg-gray-400">
+                    Batch hinzufügen
+                </button>
+
+                <button type="button" id="add-batch-open-btn" onclick="addBatchAndOpen()"
+                        class="w-full mt-2 bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 disabled:bg-gray-400">
+                    Batch erstellen & in Label Studio öffnen
+                </button>
+            </form>
+
+            <!-- Progress -->
+            <div id="batch-progress" class="hidden mt-4">
+                <div class="flex items-center">
+                    <svg class="animate-spin h-5 w-5 mr-3 text-blue-600" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span id="progress-text">Frames werden extrahiert...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Batches -->
+        <div class="bg-white rounded-lg shadow p-6 lg:col-span-2">
+            <h2 class="text-xl font-semibold mb-4">Batches</h2>
+
+            {% if project.batches %}
+            <div class="overflow-x-auto">
+                <table class="min-w-full">
+                    <thead>
+                        <tr class="border-b">
+                            <th class="text-left py-2">Batch ID</th>
+                            <th class="text-left py-2">Frames</th>
+                            <th class="text-left py-2">Status</th>
+                            <th class="text-left py-2">Erstellt</th>
+                            <th class="text-left py-2">Aktion</th>
+                        </tr>
+                    </thead>
+                    <tbody id="batches-table">
+                        {% for batch in project.batches %}
+                        <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="openBatch('{{ batch.batch_id }}')">
+                            <td class="py-3 font-mono text-sm">{{ batch.batch_id }}</td>
+                            <td class="py-3">{{ batch.num_frames or 0 }}</td>
+                            <td class="py-3">
+                                <span class="bg-green-100 text-green-800 px-2 py-1 rounded text-sm">
+                                    {{ batch.status }}
+                                </span>
+                            </td>
+                            <td class="py-3 text-sm text-gray-500">
+                                {{ batch.created_at.strftime('%d.%m.%Y %H:%M') if batch.created_at else '-' }}
+                            </td>
+                            <td class="py-3">
+                                <button class="text-blue-600 hover:text-blue-800 text-sm">
+                                    In Label Studio öffnen →
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="mt-4 p-3 bg-gray-50 rounded">
+                <strong>Total:</strong> {{ project.batches|sum(attribute='num_frames') or 0 }} Frames in {{ project.batches|length }} Batch(es)
+            </div>
+            {% else %}
+            <p class="text-gray-500">Noch keine Batches. Füge einen Batch aus einem Video hinzu.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Label Studio Info -->
+    {% if ls_info %}
+    <div class="mt-8 bg-white rounded-lg shadow p-6">
+        <h2 class="text-xl font-semibold mb-4">Labeling-Fortschritt</h2>
+
+        <div class="grid grid-cols-3 gap-4 text-center">
+            <div class="p-4 bg-gray-50 rounded">
+                <p class="text-3xl font-bold">{{ ls_info.total_tasks }}</p>
+                <p class="text-sm text-gray-500">Bilder total</p>
+            </div>
+            <div class="p-4 bg-gray-50 rounded">
+                <p class="text-3xl font-bold text-green-600">{{ ls_info.completed_tasks }}</p>
+                <p class="text-sm text-gray-500">Gelabelt</p>
+            </div>
+            <div class="p-4 bg-gray-50 rounded">
+                <p class="text-3xl font-bold">{{ "%.0f"|format(ls_info.progress) }}%</p>
+                <p class="text-sm text-gray-500">Fortschritt</p>
+            </div>
+        </div>
+
+        <div class="mt-4 bg-gray-200 rounded-full h-4">
+            <div class="bg-green-500 h-4 rounded-full" style="width: {{ ls_info.progress }}%"></div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Export Info -->
+    {% if project.export_path %}
+    <div class="mt-8 bg-green-50 border border-green-200 rounded-lg p-6">
+        <h2 class="text-xl font-semibold text-green-800 mb-2">Export vorhanden</h2>
+        <p class="text-green-700">Labels exportiert nach:</p>
+        <code class="block mt-2 p-2 bg-white rounded">{{ project.export_path }}</code>
+        <a href="{{ url_for('training.index') }}"
+           class="inline-block mt-4 bg-orange-500 text-white px-4 py-2 rounded hover:bg-orange-600">
+            Zum Training →
+        </a>
+    </div>
+    {% endif %}
+
+    <!-- Danger Zone -->
+    <div class="mt-8 bg-red-50 border border-red-200 rounded-lg p-6">
+        <h2 class="text-xl font-semibold text-red-800 mb-4">Danger Zone</h2>
+        <button onclick="deleteProject()"
+                class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">
+            Projekt löschen
+        </button>
+    </div>
+</div>
+
+<script>
+const projectId = '{{ project.id }}';
+
+// Batch hinzufügen
+document.getElementById('add-batch-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const form = e.target;
+    const btn = document.getElementById('add-batch-btn');
+    const progress = document.getElementById('batch-progress');
+
+    const data = {
+        project_id: projectId,
+        video_id: form.video_id.value,
+        num_frames: parseInt(form.num_frames.value)
+    };
+
+    btn.disabled = true;
+    progress.classList.remove('hidden');
+
+    try {
+        const response = await fetch('/labeling/api/add-batch', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            document.getElementById('progress-text').textContent =
+                `✓ ${result.frames_uploaded} Frames aus "${result.video_name}" hochgeladen!`;
+
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            alert('Fehler: ' + result.error);
+            progress.classList.add('hidden');
+            btn.disabled = false;
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+        progress.classList.add('hidden');
+        btn.disabled = false;
+    }
+});
+
+// Batch erstellen und in Label Studio öffnen
+async function addBatchAndOpen() {
+    const form = document.getElementById('add-batch-form');
+    const btn = document.getElementById('add-batch-open-btn');
+    const progress = document.getElementById('batch-progress');
+
+    const videoId = form.video_id.value;
+    const numFrames = parseInt(form.num_frames.value);
+
+    if (!videoId) {
+        alert('Bitte ein Video auswählen');
+        return;
+    }
+
+    const data = {
+        project_id: projectId,
+        video_id: videoId,
+        num_frames: numFrames
+    };
+
+    btn.disabled = true;
+    document.getElementById('add-batch-btn').disabled = true;
+    progress.classList.remove('hidden');
+    document.getElementById('progress-text').textContent = 'Frames werden extrahiert und hochgeladen...';
+
+    try {
+        const response = await fetch('/labeling/api/add-batch-and-open', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            document.getElementById('progress-text').textContent =
+                `✓ ${result.frames_uploaded} Frames hochgeladen! Öffne Label Studio...`;
+
+            // Label Studio in neuem Tab öffnen
+            window.open(result.label_studio_url, '_blank');
+
+            // Seite nach kurzer Verzögerung neu laden
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            alert('Fehler: ' + result.error);
+            progress.classList.add('hidden');
+            btn.disabled = false;
+            document.getElementById('add-batch-btn').disabled = false;
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+        progress.classList.add('hidden');
+        btn.disabled = false;
+        document.getElementById('add-batch-btn').disabled = false;
+    }
+}
+
+// Batch in Label Studio öffnen
+async function openBatch(batchId) {
+    try {
+        const response = await fetch(`/labeling/api/batch/${batchId}/open`);
+        const result = await response.json();
+
+        if (result.url) {
+            window.open(result.url, '_blank');
+        } else {
+            alert('Fehler: ' + (result.error || 'Unbekannter Fehler'));
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+
+// Labels exportieren
+async function exportLabels() {
+    if (!confirm('Labels aus Label Studio exportieren?')) return;
+
+    try {
+        const response = await fetch(`/labeling/api/export/${projectId}`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert(`✓ Export erfolgreich!\n\nBilder: ${result.images}\nLabels: ${result.labels}\nPfad: ${result.path}`);
+            location.reload();
+        } else {
+            alert('Fehler: ' + result.error);
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+
+// Projekt löschen
+async function deleteProject() {
+    if (!confirm('Projekt wirklich löschen? Dies löscht auch alle Batches und das Label Studio Projekt!')) return;
+
+    try {
+        const response = await fetch(`/labeling/api/delete/${projectId}`, {
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            window.location.href = '/labeling/';
+        } else {
+            alert('Fehler: ' + result.error);
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+</script>
+{% endblock %}

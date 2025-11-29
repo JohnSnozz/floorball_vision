@@ -11,3 +11,9 @@ def register_blueprints(app: Flask):
 
     from src.web.routes.videos import videos_bp
     app.register_blueprint(videos_bp, url_prefix="/api/videos")
+
+    from src.web.routes.labeling import labeling_bp
+    app.register_blueprint(labeling_bp)
+
+    from src.web.routes.training import training_bp
+    app.register_blueprint(training_bp)
