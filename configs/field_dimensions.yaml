@@ -1,0 +1,65 @@
+# ==============================================
+# FLOORBALL VISION - Spielfeld Dimensionen
+# ==============================================
+# Offizielle Floorball Spielfeld-Masse
+# Quelle: IFF Rules of the Game
+# ==============================================
+
+# Spielfeld
+field:
+  # Gesamtmasse (in Metern)
+  length: 40.0
+  width: 20.0
+
+  # Toleranz (für kleinere Hallen)
+  min_length: 36.0
+  max_length: 44.0
+  min_width: 18.0
+  max_width: 22.0
+
+# Tore
+goals:
+  width: 1.60
+  height: 1.15
+  depth: 0.65
+
+  # Position (Mittelpunkt auf Grundlinie)
+  position_y: 10.0  # Mitte des Feldes
+
+# Torraum
+goal_crease:
+  width: 5.0
+  depth: 4.0
+
+# Mittelkreis
+center_circle:
+  radius: 3.0
+  position_x: 20.0
+  position_y: 10.0
+
+# Eckzonen (optional, für taktische Analyse)
+corner_zones:
+  radius: 3.0
+
+# Koordinatensystem
+# Origin (0,0) = Linke untere Ecke des Spielfelds
+# X-Achse = Längsrichtung (0 bis 40m)
+# Y-Achse = Querrichtung (0 bis 20m)
+coordinate_system:
+  origin: "bottom_left"
+  x_direction: "length"
+  y_direction: "width"
+
+# Visualisierungsparameter
+visualization:
+  # Pixel pro Meter für 2D-Ansicht
+  pixels_per_meter: 20
+
+  # Liniendicke
+  line_width: 2
+
+  # Farben (RGB)
+  field_color: [60, 120, 60]      # Grün
+  line_color: [255, 255, 255]      # Weiss
+  goal_color: [200, 50, 50]        # Rot
+  crease_color: [100, 100, 200]    # Blau

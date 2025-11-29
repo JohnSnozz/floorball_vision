@@ -1,0 +1,64 @@
+# ==============================================
+# FLOORBALL VISION - Objektklassen
+# ==============================================
+# Definiert die erkennbaren Objektklassen für YOLO
+# ==============================================
+
+# YOLO Klassen (Index: Name)
+names:
+  0: ball
+  1: cornerpoints
+  2: goal
+  3: goalkeeper
+  4: period
+  5: player
+  6: ref
+  7: scoreboard
+  8: time
+
+# Beschreibungen
+descriptions:
+  ball: "Floorball (der Spielball)"
+  cornerpoints: "Eckpunkte des Spielfelds (für Kalibrierung)"
+  goal: "Tor und Tornetz"
+  goalkeeper: "Torhüter"
+  period: "Spielabschnitt-Anzeige auf dem Bildschirm"
+  player: "Feldspieler (ohne Torhüter)"
+  ref: "Schiedsrichter"
+  scoreboard: "Spielstand-Anzeige"
+  time: "Spielzeit-Anzeige"
+
+# Primäre Klassen für Tracking (werden für Positionsanalyse verwendet)
+tracking_classes:
+  - player
+  - goalkeeper
+  - ball
+  - ref
+
+# Klassen für OCR/UI (nicht für Tracking)
+ui_classes:
+  - scoreboard
+  - time
+  - period
+
+# Kalibrierungs-Klassen
+calibration_classes:
+  - cornerpoints
+  - goal
+
+# Team-Zuordnung (wird via Farberkennung oder manuelle Auswahl bestimmt)
+teams:
+  - team_a
+  - team_b
+  - unknown
+
+# Farben für Visualisierung (BGR Format für OpenCV)
+colors:
+  player: [255, 0, 0]       # Blau
+  goalkeeper: [0, 255, 255]  # Gelb
+  ball: [0, 165, 255]        # Orange
+  ref: [128, 128, 128]       # Grau
+  goal: [0, 0, 255]          # Rot
+  cornerpoints: [0, 255, 0]  # Grün
+  team_a: [255, 0, 0]        # Blau
+  team_b: [0, 0, 255]        # Rot

@@ -1,49 +1,170 @@
-# Basketball project (separate project)
+# ============================================
+# FLOORBALL VISION - GITIGNORE
+# ============================================
+# Diese Datei definiert, welche Dateien NICHT
+# ins Git-Repository kommen.
+# ============================================
+
+# --------------------------------------------
+# ANDERE PROJEKTE (nicht Teil dieses Repos)
+# --------------------------------------------
 basketball/
 
-# Raw videos (large files)
+# --------------------------------------------
+# GROSSE DATEIEN & DATEN
+# --------------------------------------------
+
+# Alle Daten (Videos, Frames, Exports, Cache)
+data/
+
+# ML Modelle (.pt Dateien sind gross)
+models/
+*.pt
+*.pth
+*.onnx
+
+# YOLO Training Outputs
+runs/
+
+# --------------------------------------------
+# LEGACY ORDNER (alte Struktur)
+# --------------------------------------------
 raw_videos/
 video_in/
 video_out/
-ytimport/raw_videos/
-ytimport/screenshot_batches/
-ytimport/screenshot_raw/
-
-# YOLO model files (large .pt files)
-*.pt
-
-# Training data (images and labels)
+ytimport/
 images/
 labels/
 fb_training_images/
 
-# Training runs/outputs
-runs/
-
-# Python
+# --------------------------------------------
+# PYTHON
+# --------------------------------------------
 __pycache__/
 *.py[cod]
 *$py.class
 .Python
 *.so
-.env
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual Environments
+.venv/
 venv/
 ENV/
+env/
 
-# Jupyter Notebook checkpoints
+# --------------------------------------------
+# UMGEBUNG & SECRETS
+# --------------------------------------------
+.env
+.env.local
+.env.production
+*.pem
+*.key
+secrets/
+
+# Aber .env.example soll ins Repo!
+!.env.example
+
+# --------------------------------------------
+# JUPYTER NOTEBOOKS
+# --------------------------------------------
 .ipynb_checkpoints/
+*.ipynb
 
-# OS files
+# Aber Notebooks im notebooks/ Ordner behalten
+!notebooks/
+
+# --------------------------------------------
+# BETRIEBSSYSTEM
+# --------------------------------------------
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
 Thumbs.db
+ehthumbs.db
+Desktop.ini
 
-# IDE
+# --------------------------------------------
+# IDE & EDITOREN
+# --------------------------------------------
 .idea/
 .vscode/
 *.swp
 *.swo
+*.sublime-workspace
+*.sublime-project
+.spyproject/
+.ropeproject/
 
-# Claude Code
+# --------------------------------------------
+# CLAUDE CODE / AI ASSISTENTEN
+# --------------------------------------------
 .claude/
 CLAUDE.md
 CLAUDE.local.md
+
+# --------------------------------------------
+# LOGS & TEMPORÄRE DATEIEN
+# --------------------------------------------
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.bak
+*.cache
+
+# --------------------------------------------
+# DOCKER
+# --------------------------------------------
+# Docker Volumes (falls lokal)
+docker/volumes/
+postgres_data/
+redis_data/
+
+# --------------------------------------------
+# ALEMBIC
+# --------------------------------------------
+# Migrations sollen ins Repo, aber nicht:
+migrations/versions/__pycache__/
+
+# --------------------------------------------
+# TESTS
+# --------------------------------------------
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# --------------------------------------------
+# CELERY
+# --------------------------------------------
+celerybeat-schedule
+celerybeat.pid
+
+# --------------------------------------------
+# NODE.JS (VERBOTEN - sollte nicht existieren!)
+# --------------------------------------------
+# Falls jemand versehentlich Node installiert:
+node_modules/
+package.json
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.npm/
+.yarn/
+
+# --------------------------------------------
+# SONSTIGES
+# --------------------------------------------
+*.pid
+*.seed
+*.pid.lock
+*.tgz

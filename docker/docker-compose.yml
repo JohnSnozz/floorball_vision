@@ -1,0 +1,50 @@
+# ==============================================
+# FLOORBALL VISION - Docker Compose
+# ==============================================
+# Startet PostgreSQL und Redis für die Entwicklung
+#
+# Verwendung:
+#   cd docker
+#   docker-compose up -d
+# ==============================================
+
+services:
+  # PostgreSQL Datenbank
+  db:
+    image: postgres:16-alpine
+    container_name: floorball_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-floorball_vision}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis für Celery Task Queue
+  redis:
+    image: redis:7-alpine
+    container_name: floorball_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+    name: floorball_postgres_data
+  redis_data:
+    name: floorball_redis_data

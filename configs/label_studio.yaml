@@ -1,0 +1,44 @@
+# ==============================================
+# FLOORBALL VISION - Label Studio Konfiguration
+# ==============================================
+# Einstellungen für Label Studio Integration
+# ==============================================
+
+# Verbindung
+connection:
+  url: "${LABEL_STUDIO_URL:-http://localhost:8080}"
+  api_key: "${LABEL_STUDIO_API_KEY}"
+
+# Standard Label-Konfiguration (XML)
+# Wird beim Erstellen neuer Projekte verwendet
+default_label_config: |
+  <View>
+    <Image name="image" value="$image"/>
+    <RectangleLabels name="label" toName="image">
+      <Label value="player" background="#0000FF"/>
+      <Label value="goalkeeper" background="#FFFF00"/>
+      <Label value="ball" background="#FFA500"/>
+      <Label value="referee" background="#000000"/>
+    </RectangleLabels>
+  </View>
+
+# Projekt-Template
+project_template:
+  title_prefix: "Floorball Training"
+  description: "Floorball Spieler und Ball Detection Training Data"
+
+# Auto-Training Einstellungen
+auto_training:
+  enabled: false
+  min_annotations: 100
+  check_interval_seconds: 300  # Alle 5 Minuten prüfen
+
+# Export-Einstellungen
+export:
+  format: "YOLO"
+  include_images: true
+
+# Webhook für Annotation Updates
+webhook:
+  enabled: false
+  endpoint: "/api/labeling/webhook"
