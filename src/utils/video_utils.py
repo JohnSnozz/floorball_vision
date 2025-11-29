@@ -10,6 +10,111 @@ import cv2
 import numpy as np
 
 
+def get_video_metadata(video_path: str) -> dict:
+    """
+    Extrahiert Video-Metadaten.
+
+    Args:
+        video_path: Pfad zur Videodatei
+
+    Returns:
+        dict: Metadaten (width, height, fps, duration, codec, frame_count)
+    """
+    cap = cv2.VideoCapture(video_path)
+
+    if not cap.isOpened():
+        raise ValueError(f"Konnte Video nicht öffnen: {video_path}")
+
+    try:
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        return {
+            "width": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+            "height": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+            "fps": fps,
+            "frame_count": frame_count,
+            "duration": frame_count / fps if fps > 0 else 0,
+            "codec": int(cap.get(cv2.CAP_PROP_FOURCC)),
+        }
+    finally:
+        cap.release()
+
+
+def generate_thumbnail(video_path: str, output_path: str, timestamp: float = 1.0) -> bool:
+    """
+    Generiert ein Thumbnail aus dem Video.
+
+    Args:
+        video_path: Pfad zur Videodatei
+        output_path: Pfad für das Thumbnail
+        timestamp: Zeitpunkt in Sekunden (default: 1.0)
+
+    Returns:
+        bool: True wenn erfolgreich
+    """
+    cap = cv2.VideoCapture(video_path)
+
+    if not cap.isOpened():
+        raise ValueError(f"Konnte Video nicht öffnen: {video_path}")
+
+    try:
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_number = int(timestamp * fps)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+
+        ret, frame = cap.read()
+        if not ret:
+            # Falls Frame nicht verfügbar, erstes Frame nehmen
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            ret, frame = cap.read()
+
+        if ret:
+            # Thumbnail auf max 320px Breite skalieren
+            height, width = frame.shape[:2]
+            if width > 320:
+                scale = 320 / width
+                new_width = 320
+                new_height = int(height * scale)
+                frame = cv2.resize(frame, (new_width, new_height))
+
+            # Speichern
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            cv2.imwrite(output_path, frame)
+            return True
+
+        return False
+    finally:
+        cap.release()
+
+
+def extract_frame(video_path: str, timestamp: float) -> Optional[np.ndarray]:
+    """
+    Extrahiert einen einzelnen Frame aus dem Video.
+
+    Args:
+        video_path: Pfad zur Videodatei
+        timestamp: Zeitpunkt in Sekunden
+
+    Returns:
+        Frame als numpy array oder None
+    """
+    cap = cv2.VideoCapture(video_path)
+
+    if not cap.isOpened():
+        return None
+
+    try:
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_number = int(timestamp * fps)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+
+        ret, frame = cap.read()
+        return frame if ret else None
+    finally:
+        cap.release()
+
+
 def read_video(video_path: str) -> Generator[np.ndarray, None, None]:
     """
     Read video frames as a generator.
