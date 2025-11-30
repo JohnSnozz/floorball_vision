@@ -68,6 +68,7 @@ secrets/
 
 # Aber .env.example soll ins Repo!
 !.env.example
+.env.save
 
 # --------------------------------------------
 # JUPYTER NOTEBOOKS
@@ -162,9 +163,23 @@ pnpm-lock.yaml
 .yarn/
 
 # --------------------------------------------
+# TEST-DATEIEN (temporäre Testbilder etc.)
+# --------------------------------------------
+tests/*.jpg
+tests/*.png
+tests/*.mp4
+tests/*Zone.Identifier
+
+# --------------------------------------------
+# DOKUMENTATION (generiert, nicht Code)
+# --------------------------------------------
+docs/CALIBRATION_STATUS.md
+
+# --------------------------------------------
 # SONSTIGES
 # --------------------------------------------
 *.pid
 *.seed
 *.pid.lock
 *.tgz
+*Zone.Identifier

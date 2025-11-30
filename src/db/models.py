@@ -72,6 +72,29 @@ class Calibration(Base):
     Kamera-Kalibrierungen
 
     Speichert Homographie-Matrizen für die Koordinaten-Transformation.
+
+    calibration_data Format:
+    {
+        "step1_screenshots": {
+            "screenshot_index": 0,  # Ausgewählter Screenshot für weitere Schritte
+            "generated_at": "2024-..."
+        },
+        "step2_boundary": {
+            "boundary_polygon": [[x1,y1], [x2,y2], ...],
+            "saved_at": "2024-..."
+        },
+        "step3_points": {
+            "image_points": [[x1,y1], ...],
+            "field_points": [[x1,y1], ...],
+            "straight_lines": [{"points": [...], "type": "horizontal"}, ...],
+            "saved_at": "2024-..."
+        },
+        "step4_verify": {
+            "lens_profile_id": "gopro_hero10_...",
+            "homography_matrix": [[...], [...], [...]],
+            "verified_at": "2024-..."
+        }
+    }
     """
     __tablename__ = "calibrations"
 
@@ -81,12 +104,15 @@ class Calibration(Base):
     # Kalibrierungsname
     name = Column(String(255))
 
-    # Kalibrierungsdaten (JSON)
-    # Enthält: source_points, target_points, homography_matrix
-    calibration_data = Column(JSON, nullable=False)
+    # Kalibrierungsdaten (JSON) - schrittweise gespeichert
+    # Enthält: step1_screenshots, step2_boundary, step3_points, step4_verify
+    calibration_data = Column(JSON, nullable=False, default=dict)
 
     # Optionale Fisheye-Korrektur Parameter
     fisheye_params = Column(JSON)  # Distortion coefficients
+
+    # Aktueller Schritt (1-4), zeigt Fortschritt an
+    current_step = Column(Integer, default=1)
 
     # Felddimensionen (für Referenz)
     field_length = Column(Float, default=40.0)  # Meter
@@ -97,6 +123,7 @@ class Calibration(Base):
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
     video = relationship("Video", back_populates="calibrations")
@@ -216,6 +243,9 @@ class TrainingRun(Base):
     # Status
     status = Column(String(50), default="pending")  # pending, running, completed, failed
     error_message = Column(Text)
+
+    # Celery Task ID
+    celery_task_id = Column(String(255))
 
     # Timestamps
     started_at = Column(DateTime)

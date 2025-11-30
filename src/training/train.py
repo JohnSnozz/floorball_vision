@@ -9,6 +9,21 @@ from typing import Optional
 from ultralytics import YOLO
 
 
+def get_best_device() -> str:
+    """Erkennt automatisch die beste verfügbare Hardware (GPU/CPU)."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            gpu_name = torch.cuda.get_device_name(0)
+            print(f"GPU erkannt: {gpu_name}")
+            return "0"  # Erste GPU verwenden
+    except Exception as e:
+        print(f"GPU-Erkennung fehlgeschlagen: {e}")
+
+    print("Keine GPU verfügbar, verwende CPU")
+    return "cpu"
+
+
 def train_model(
     data_yaml: str,
     model: str = 'yolov8n.pt',
@@ -18,7 +33,9 @@ def train_model(
     project: str = 'runs/detect',
     name: str = 'train',
     device: Optional[str] = None,
-    resume: bool = False
+    resume: bool = False,
+    patience: int = 50,
+    **kwargs
 ) -> str:
     """
     Train a YOLO model.
@@ -31,12 +48,18 @@ def train_model(
         batch: Batch size
         project: Project directory for outputs
         name: Run name
-        device: Device to use ('cuda', 'cpu', or specific GPU)
+        device: Device to use ('cuda', 'cpu', or specific GPU). Auto-detected if None.
         resume: Resume from last checkpoint
+        patience: Early stopping patience (epochs without improvement)
+        **kwargs: Additional training arguments (augmentation params, etc.)
 
     Returns:
         Path to best weights file
     """
+    # GPU automatisch erkennen wenn nicht explizit gesetzt
+    if device is None:
+        device = get_best_device()
+
     yolo = YOLO(model)
 
     train_args = {
@@ -47,11 +70,18 @@ def train_model(
         'project': project,
         'name': name,
         'resume': resume,
+        'patience': patience,
+        'exist_ok': True,  # Überschreibe bestehende Runs
+        'workers': 0,  # Wichtig für Celery - keine Sub-Prozesse
+        'device': device,  # GPU/CPU
     }
 
-    if device:
-        train_args['device'] = device
+    # Zusätzliche Parameter (Augmentation etc.) hinzufügen
+    for key, value in kwargs.items():
+        if value is not None:
+            train_args[key] = value
 
+    print(f"Starting training with device: {device}")
     results = yolo.train(**train_args)
 
     weights_path = Path(project) / name / 'weights' / 'best.pt'

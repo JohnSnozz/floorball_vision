@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Schachbrett - Lens Kalibrierung</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: white;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        #controls {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 1000;
+            font-size: 14px;
+            transition: opacity 0.3s;
+        }
+
+        #controls.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        #controls label {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        #controls input, #controls select {
+            width: 100%;
+            padding: 5px;
+            margin-bottom: 10px;
+            border: none;
+            border-radius: 4px;
+        }
+
+        #controls button {
+            width: 100%;
+            padding: 8px;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 5px;
+        }
+
+        #controls button:hover {
+            background: #2563eb;
+        }
+
+        #controls button.secondary {
+            background: #6b7280;
+        }
+
+        #controls button.secondary:hover {
+            background: #4b5563;
+        }
+
+        #info {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 12px;
+            z-index: 1000;
+            transition: opacity 0.3s;
+        }
+
+        #info.hidden {
+            opacity: 0;
+        }
+
+        #checkerboard {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .instructions {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 30px;
+            border-radius: 12px;
+            text-align: center;
+            z-index: 2000;
+            max-width: 500px;
+        }
+
+        .instructions h2 {
+            margin-bottom: 15px;
+        }
+
+        .instructions p {
+            margin-bottom: 10px;
+            line-height: 1.6;
+        }
+
+        .instructions button {
+            margin-top: 15px;
+            padding: 12px 30px;
+            background: #22c55e;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        .instructions button:hover {
+            background: #16a34a;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <!-- Instructions overlay -->
+    <div id="instructions" class="instructions">
+        <h2>Schachbrett-Kalibrierung</h2>
+        <p>Fotografiere dieses Schachbrett mit deiner GoPro aus <strong>verschiedenen Winkeln und Positionen</strong>.</p>
+        <p>Mache <strong>10-20 Fotos</strong> - das Muster muss nicht immer komplett sichtbar sein!</p>
+        <p>Drücke <strong>F</strong> für Fullscreen, <strong>H</strong> um die Controls auszublenden.</p>
+        <button onclick="startCalibration()">Verstanden, los geht's!</button>
+    </div>
+
+    <!-- Controls -->
+    <div id="controls">
+        <label>Innere Ecken Breite</label>
+        <input type="number" id="board-width" value="9" min="4" max="15" onchange="drawCheckerboard()">
+
+        <label>Innere Ecken Höhe</label>
+        <input type="number" id="board-height" value="6" min="4" max="15" onchange="drawCheckerboard()">
+
+        <label>Quadratgrösse (px)</label>
+        <input type="number" id="square-size" value="80" min="20" max="200" onchange="drawCheckerboard()">
+
+        <button onclick="toggleFullscreen()">Fullscreen (F)</button>
+        <button onclick="hideControls()" class="secondary">Controls ausblenden (H)</button>
+        <button onclick="window.location.href='/calibration/lens'" class="secondary">Zurück</button>
+    </div>
+
+    <!-- Info -->
+    <div id="info">
+        <span id="dimensions">10 x 7 Quadrate | 9 x 6 innere Ecken</span>
+    </div>
+
+    <!-- Checkerboard canvas -->
+    <canvas id="checkerboard"></canvas>
+
+    <script>
+        const canvas = document.getElementById('checkerboard');
+        const ctx = canvas.getContext('2d');
+
+        function drawCheckerboard() {
+            const innerWidth = parseInt(document.getElementById('board-width').value);
+            const innerHeight = parseInt(document.getElementById('board-height').value);
+            const squareSize = parseInt(document.getElementById('square-size').value);
+
+            // Actual squares = inner corners + 1
+            const cols = innerWidth + 1;
+            const rows = innerHeight + 1;
+
+            canvas.width = cols * squareSize;
+            canvas.height = rows * squareSize;
+
+            // White background
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw black squares
+            ctx.fillStyle = 'black';
+            for (let row = 0; row < rows; row++) {
+                for (let col = 0; col < cols; col++) {
+                    if ((row + col) % 2 === 0) {
+                        ctx.fillRect(col * squareSize, row * squareSize, squareSize, squareSize);
+                    }
+                }
+            }
+
+            // Update info
+            document.getElementById('dimensions').textContent =
+                `${cols} x ${rows} Quadrate | ${innerWidth} x ${innerHeight} innere Ecken`;
+        }
+
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen();
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
+        function hideControls() {
+            document.getElementById('controls').classList.toggle('hidden');
+            document.getElementById('info').classList.toggle('hidden');
+        }
+
+        function startCalibration() {
+            document.getElementById('instructions').classList.add('hidden');
+            drawCheckerboard();
+        }
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'f' || e.key === 'F') {
+                toggleFullscreen();
+            } else if (e.key === 'h' || e.key === 'H') {
+                hideControls();
+            } else if (e.key === 'Escape') {
+                document.getElementById('controls').classList.remove('hidden');
+                document.getElementById('info').classList.remove('hidden');
+            }
+        });
+
+        // Initial draw
+        drawCheckerboard();
+    </script>
+</body>
+</html>

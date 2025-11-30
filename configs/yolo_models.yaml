@@ -1,0 +1,197 @@
+# YOLO Modell-Konfiguration für Floorball Vision
+#
+# Dieses File definiert die verfügbaren YOLO-Modelle und ihre Eigenschaften.
+# Basiert auf Ultralytics YOLOv8/v5 Modellen.
+
+# === YOLO Modell-Kategorien ===
+#
+# Die Modelle sind nach Grösse/Geschwindigkeit sortiert:
+# - nano (n): Schnellstes, kleinste Genauigkeit
+# - small (s): Guter Kompromiss für Echtzeit
+# - medium (m): Ausgewogen
+# - large (l): Hohe Genauigkeit, langsamer
+# - extra-large (x): Beste Genauigkeit, langsamste
+
+models:
+  # === YOLOv8 Detection Models ===
+  yolov8n.pt:
+    name: "YOLOv8 Nano"
+    category: "detection"
+    size: "nano"
+    params: "3.2M"
+    speed: "~2ms"
+    map_coco: "37.3"
+    description: "Schnellstes Modell. Ideal für Echtzeit-Anwendungen auf schwacher Hardware oder wenn viele Frames pro Sekunde benötigt werden."
+    recommended_for:
+      - "Echtzeit-Tracking"
+      - "Schwache Hardware / CPU"
+      - "Hohe FPS Anforderungen"
+
+  yolov8s.pt:
+    name: "YOLOv8 Small"
+    category: "detection"
+    size: "small"
+    params: "11.2M"
+    speed: "~3ms"
+    map_coco: "44.9"
+    description: "Guter Kompromiss zwischen Geschwindigkeit und Genauigkeit. Empfohlen für die meisten Anwendungen."
+    recommended_for:
+      - "Standard Spieler-Tracking"
+      - "Mittlere Hardware"
+      - "Gute Balance"
+
+  yolov8m.pt:
+    name: "YOLOv8 Medium"
+    category: "detection"
+    size: "medium"
+    params: "25.9M"
+    speed: "~5ms"
+    map_coco: "50.2"
+    description: "Ausgewogenes Modell mit höherer Genauigkeit. Für Situationen wo Präzision wichtiger ist als Echtzeit."
+    recommended_for:
+      - "Präzises Tracking"
+      - "Gute GPU vorhanden"
+      - "Post-Processing Analysen"
+
+  yolov8l.pt:
+    name: "YOLOv8 Large"
+    category: "detection"
+    size: "large"
+    params: "43.7M"
+    speed: "~8ms"
+    map_coco: "52.9"
+    description: "Hohe Genauigkeit für anspruchsvolle Szenarien. Erkennt auch kleine Objekte wie den Ball besser."
+    recommended_for:
+      - "Ball-Tracking"
+      - "Kleine Objekte"
+      - "Starke GPU"
+
+  yolov8x.pt:
+    name: "YOLOv8 Extra-Large"
+    category: "detection"
+    size: "xlarge"
+    params: "68.2M"
+    speed: "~12ms"
+    map_coco: "53.9"
+    description: "Beste Genauigkeit. Für Offline-Analysen wo Zeit keine Rolle spielt."
+    recommended_for:
+      - "Maximale Genauigkeit"
+      - "Offline-Analyse"
+      - "High-End GPU"
+
+  # === YOLOv5 Models (Alternative, bewährt) ===
+  yolov5n.pt:
+    name: "YOLOv5 Nano"
+    category: "detection"
+    size: "nano"
+    params: "1.9M"
+    speed: "~1.5ms"
+    map_coco: "28.0"
+    description: "Kleinstes YOLOv5 Modell. Noch schneller als v8 nano, aber weniger genau."
+    recommended_for:
+      - "Extrem schnelle Inferenz"
+      - "Edge Devices"
+
+  yolov5s.pt:
+    name: "YOLOv5 Small"
+    category: "detection"
+    size: "small"
+    params: "7.2M"
+    speed: "~2ms"
+    map_coco: "37.4"
+    description: "Bewährtes Modell mit guter Community-Unterstützung."
+    recommended_for:
+      - "Stabile Performance"
+      - "Gut dokumentiert"
+
+  yolov5l6.pt:
+    name: "YOLOv5 Large P6"
+    category: "detection"
+    size: "large"
+    params: "76.8M"
+    speed: "~15ms"
+    map_coco: "53.7"
+    description: "P6-Modell mit 1280px Input. Besser für hochauflösende Videos und kleine Objekte."
+    recommended_for:
+      - "4K Videos"
+      - "Ball-Detection"
+      - "Hohe Auflösung"
+
+# === Empfehlungen für Floorball ===
+recommendations:
+  # Task-spezifische Empfehlungen
+  player_tracking:
+    primary: "yolov8s.pt"
+    alternative: "yolov8m.pt"
+    description: "Spieler sind gross genug für kleinere Modelle. Geschwindigkeit ist wichtiger."
+
+  ball_tracking:
+    primary: "yolov8l.pt"
+    alternative: "yolov5l6.pt"
+    description: "Der Ball ist klein und schnell. Grössere Modelle erkennen ihn zuverlässiger."
+
+  full_detection:
+    primary: "yolov8m.pt"
+    alternative: "yolov8l.pt"
+    description: "Für alle Objekte (Spieler, Ball, Tor, etc.) ein mittleres Modell verwenden."
+
+  realtime:
+    primary: "yolov8n.pt"
+    alternative: "yolov8s.pt"
+    description: "Wenn Echtzeit-Feedback wichtiger ist als perfekte Genauigkeit."
+
+# === Training Parameter Defaults ===
+training_defaults:
+  epochs: 100
+  batch_size: 16
+  image_size: 1080
+  patience: 50
+  optimizer: "auto"
+  lr0: 0.01
+  lrf: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+  warmup_epochs: 3.0
+  warmup_momentum: 0.8
+  warmup_bias_lr: 0.1
+
+# === Augmentation Presets ===
+augmentation_presets:
+  light:
+    name: "Leicht"
+    description: "Minimale Augmentation. Gut wenn Trainingsdaten repräsentativ sind."
+    hsv_h: 0.015
+    hsv_s: 0.4
+    hsv_v: 0.3
+    degrees: 0.0
+    translate: 0.1
+    scale: 0.3
+    fliplr: 0.5
+    mosaic: 0.5
+
+  medium:
+    name: "Mittel"
+    description: "Standard-Augmentation. Empfohlen für die meisten Fälle."
+    hsv_h: 0.015
+    hsv_s: 0.7
+    hsv_v: 0.4
+    degrees: 5.0
+    translate: 0.1
+    scale: 0.5
+    fliplr: 0.5
+    mosaic: 1.0
+    mixup: 0.1
+
+  heavy:
+    name: "Stark"
+    description: "Aggressive Augmentation. Hilft bei kleinen Datasets."
+    hsv_h: 0.02
+    hsv_s: 0.9
+    hsv_v: 0.5
+    degrees: 10.0
+    translate: 0.2
+    scale: 0.9
+    fliplr: 0.5
+    mosaic: 1.0
+    mixup: 0.3
+    copy_paste: 0.3

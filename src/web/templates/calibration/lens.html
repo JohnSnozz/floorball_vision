@@ -1,0 +1,1339 @@
+{% extends "base.html" %}
+
+{% block title %}Lens-Kalibrierung - Floorball Vision{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <!-- Header mit Navigation -->
+    <div class="flex items-center justify-between mb-8">
+        <div>
+            <a href="{{ url_for('calibration.index') }}" class="text-blue-500 hover:underline text-sm">
+                &larr; Zurück zur Kalibrierung
+            </a>
+            <h1 class="text-3xl font-bold mt-2">Lens-Kalibrierung</h1>
+            <p class="text-gray-600">Kalibriere deine GoPro/Fisheye-Linse mit Schachbrett-Fotos</p>
+        </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="border-b border-gray-200 mb-6">
+        <nav class="flex gap-4">
+            <button onclick="showTab('generate')" id="tab-generate"
+                    class="tab-btn py-3 px-4 border-b-2 border-blue-500 text-blue-600 font-medium">
+                1. Schachbrett generieren
+            </button>
+            <button onclick="showTab('upload')" id="tab-upload"
+                    class="tab-btn py-3 px-4 border-b-2 border-transparent text-gray-500 hover:text-gray-700">
+                2. Fotos hochladen
+            </button>
+            <button onclick="showTab('calibrate')" id="tab-calibrate"
+                    class="tab-btn py-3 px-4 border-b-2 border-transparent text-gray-500 hover:text-gray-700">
+                3. Kalibrieren
+            </button>
+            <button onclick="showTab('profiles')" id="tab-profiles"
+                    class="tab-btn py-3 px-4 border-b-2 border-transparent text-gray-500 hover:text-gray-700">
+                Gespeicherte Profile
+            </button>
+            <button onclick="showTab('test')" id="tab-test"
+                    class="tab-btn py-3 px-4 border-b-2 border-transparent text-gray-500 hover:text-gray-700">
+                4. Profil testen
+            </button>
+        </nav>
+    </div>
+
+    <!-- Tab 1: Schachbrett generieren -->
+    <div id="panel-generate" class="tab-panel">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold mb-4">Schachbrett-Muster erstellen</h2>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Innere Ecken (Breite)</label>
+                        <input type="number" id="board-width" value="9" min="4" max="20"
+                               class="w-full border rounded px-3 py-2">
+                        <p class="text-xs text-gray-500 mt-1">Anzahl innerer Schnittpunkte horizontal</p>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Innere Ecken (Höhe)</label>
+                        <input type="number" id="board-height" value="6" min="4" max="20"
+                               class="w-full border rounded px-3 py-2">
+                        <p class="text-xs text-gray-500 mt-1">Anzahl innerer Schnittpunkte vertikal</p>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Quadratgrösse (mm)</label>
+                        <input type="number" id="square-size" value="30" min="10" max="100"
+                               class="w-full border rounded px-3 py-2">
+                        <p class="text-xs text-gray-500 mt-1">Grösse eines Quadrats beim Ausdrucken</p>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Papierformat</label>
+                        <select id="paper-size" class="w-full border rounded px-3 py-2">
+                            <option value="a4">A4 (210 x 297 mm)</option>
+                            <option value="a3">A3 (297 x 420 mm)</option>
+                            <option value="letter">Letter (216 x 279 mm)</option>
+                        </select>
+                    </div>
+
+                    <a href="{{ url_for('calibration.checkerboard_fullscreen') }}" target="_blank"
+                       class="block w-full bg-blue-500 text-white py-3 rounded-lg hover:bg-blue-600 font-medium text-center">
+                        Schachbrett am Bildschirm anzeigen
+                    </a>
+                    <p class="text-xs text-gray-500 mt-2 text-center">
+                        Öffnet Fullscreen-Ansicht zum Fotografieren
+                    </p>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold mb-4">Anleitung</h2>
+
+                <div class="space-y-4 text-sm">
+                    <div class="flex gap-3">
+                        <div class="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold shrink-0">1</div>
+                        <div>
+                            <p class="font-medium">PDF herunterladen und ausdrucken</p>
+                            <p class="text-gray-600">Drucke das Schachbrett auf festem Papier aus. Stelle sicher, dass "Tatsächliche Grösse" aktiviert ist.</p>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-3">
+                        <div class="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold shrink-0">2</div>
+                        <div>
+                            <p class="font-medium">Auf flache Oberfläche kleben</p>
+                            <p class="text-gray-600">Klebe das Muster auf eine stabile, flache Unterlage (Karton, Brett).</p>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-3">
+                        <div class="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold shrink-0">3</div>
+                        <div>
+                            <p class="font-medium">10-20 Fotos aus verschiedenen Winkeln</p>
+                            <p class="text-gray-600">Fotografiere das Muster aus verschiedenen Positionen und Winkeln. Achte darauf, dass das Muster komplett sichtbar ist.</p>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-3">
+                        <div class="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold shrink-0">4</div>
+                        <div>
+                            <p class="font-medium">Fotos hochladen</p>
+                            <p class="text-gray-600">Lade die Fotos im nächsten Tab hoch für die automatische Kalibrierung.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <p class="text-sm text-yellow-800">
+                        <strong>Tipp:</strong> Für beste Ergebnisse verwende die gleiche Kamera-Einstellung (Auflösung, FOV) wie bei deinen Videos.
+                    </p>
+                </div>
+
+                <!-- Preview -->
+                <div class="mt-6">
+                    <h3 class="font-medium mb-2">Vorschau</h3>
+                    <div id="checkerboard-preview" class="border rounded bg-gray-100 p-4 flex items-center justify-center" style="min-height: 200px;">
+                        <canvas id="preview-canvas" width="300" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tab 2: Fotos hochladen -->
+    <div id="panel-upload" class="tab-panel hidden">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div class="lg:col-span-2">
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-xl font-semibold mb-4">Schachbrett-Fotos hochladen</h2>
+
+                    <!-- Drag & Drop Zone -->
+                    <div id="drop-zone"
+                         class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-blue-500 transition-colors cursor-pointer"
+                         ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
+                        <div class="text-gray-500">
+                            <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                                <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                            </svg>
+                            <p class="mt-2 text-lg font-medium">Fotos hierher ziehen</p>
+                            <p class="mt-1">oder klicken zum Auswählen</p>
+                            <p class="mt-2 text-sm text-gray-400">JPG, PNG - Mehrere Dateien möglich</p>
+                        </div>
+                        <input type="file" id="file-input" multiple accept="image/*" class="hidden" onchange="handleFileSelect(event)">
+                    </div>
+
+                    <!-- Uploaded Images Grid -->
+                    <div id="uploaded-images" class="mt-6 grid grid-cols-4 gap-4">
+                        <!-- Images will be added here -->
+                    </div>
+
+                    <div class="mt-6 flex justify-between items-center">
+                        <div>
+                            <span id="image-count" class="text-gray-600">0 Fotos hochgeladen</span>
+                            <span id="detection-status" class="ml-4 text-gray-500"></span>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="redetectAllImages()" class="text-blue-500 hover:text-blue-700 text-sm">
+                                Alle neu erkennen
+                            </button>
+                            <button onclick="clearAllImages()" class="text-red-500 hover:text-red-700 text-sm">
+                                Alle entfernen
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h3 class="font-semibold mb-4">Kalibrierungs-Einstellungen</h3>
+
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Kamera-Name</label>
+                            <input type="text" id="camera-name" value="GoPro Hero"
+                                   class="w-full border rounded px-3 py-2">
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Linsen-Typ</label>
+                            <select id="lens-type" class="w-full border rounded px-3 py-2">
+                                <option value="fisheye">Fisheye / Weitwinkel</option>
+                                <option value="standard">Standard</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Schachbrett-Grösse</label>
+                            <div class="grid grid-cols-2 gap-2">
+                                <input type="number" id="cb-width" value="9" min="4" max="20"
+                                       class="border rounded px-3 py-2" placeholder="Breite">
+                                <input type="number" id="cb-height" value="6" min="4" max="20"
+                                       class="border rounded px-3 py-2" placeholder="Höhe">
+                            </div>
+                            <p class="text-xs text-gray-500 mt-1">Innere Ecken (wie beim Generieren)</p>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Quadratgrösse (mm)</label>
+                            <input type="number" id="cb-square-size" value="30" min="10" max="100"
+                                   class="w-full border rounded px-3 py-2">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h4 class="font-medium text-blue-800 mb-2">Tipps für gute Fotos</h4>
+                    <ul class="text-sm text-blue-700 space-y-1">
+                        <li>• Mindestens 10 Fotos verwenden</li>
+                        <li>• Verschiedene Winkel und Positionen</li>
+                        <li>• Muster sollte 30-80% des Bildes füllen</li>
+                        <li>• Scharfe Bilder ohne Bewegungsunschärfe</li>
+                        <li>• Gute Beleuchtung ohne Reflexionen</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tab 3: Kalibrieren -->
+    <div id="panel-calibrate" class="tab-panel hidden">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold mb-4">Kalibrierung durchführen</h2>
+
+                <div id="calibration-status" class="mb-6">
+                    <div class="flex items-center gap-3 p-4 bg-gray-50 rounded-lg">
+                        <div id="status-icon" class="text-2xl">📷</div>
+                        <div>
+                            <p id="status-text" class="font-medium">Bereit zur Kalibrierung</p>
+                            <p id="status-detail" class="text-sm text-gray-500">Lade Fotos hoch und starte die Kalibrierung</p>
+                        </div>
+                    </div>
+                </div>
+
+                <button onclick="startCalibration()" id="calibrate-btn"
+                        class="w-full bg-green-500 text-white py-3 rounded-lg hover:bg-green-600 font-medium disabled:bg-gray-300 disabled:cursor-not-allowed"
+                        disabled>
+                    Kalibrierung starten
+                </button>
+
+                <!-- Progress -->
+                <div id="calibration-progress" class="mt-6 hidden">
+                    <div class="flex justify-between text-sm text-gray-600 mb-1">
+                        <span>Verarbeite Bilder...</span>
+                        <span id="progress-text">0%</span>
+                    </div>
+                    <div class="w-full bg-gray-200 rounded-full h-2">
+                        <div id="progress-bar" class="bg-blue-500 h-2 rounded-full transition-all" style="width: 0%"></div>
+                    </div>
+                    <p id="progress-detail" class="text-sm text-gray-500 mt-2"></p>
+                </div>
+
+                <!-- Results -->
+                <div id="calibration-results" class="mt-6 hidden">
+                    <h3 class="font-semibold mb-3">Kalibrierungs-Ergebnisse</h3>
+
+                    <div class="space-y-3">
+                        <div class="flex justify-between p-3 bg-gray-50 rounded">
+                            <span class="text-gray-600">Reprojektionsfehler</span>
+                            <span id="result-error" class="font-mono font-medium">-</span>
+                        </div>
+                        <div class="flex justify-between p-3 bg-gray-50 rounded">
+                            <span class="text-gray-600">Verwendete Bilder</span>
+                            <span id="result-images" class="font-mono font-medium">-</span>
+                        </div>
+                        <div class="flex justify-between p-3 bg-gray-50 rounded">
+                            <span class="text-gray-600">Brennweite (fx, fy)</span>
+                            <span id="result-focal" class="font-mono font-medium text-sm">-</span>
+                        </div>
+                        <div class="flex justify-between p-3 bg-gray-50 rounded">
+                            <span class="text-gray-600">Hauptpunkt (cx, cy)</span>
+                            <span id="result-center" class="font-mono font-medium text-sm">-</span>
+                        </div>
+                        <div class="flex justify-between p-3 bg-gray-50 rounded">
+                            <span class="text-gray-600">Distortion (k1, k2, k3, k4)</span>
+                            <span id="result-distortion" class="font-mono font-medium text-xs">-</span>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 flex gap-3">
+                        <button onclick="saveProfile()"
+                                class="flex-1 bg-blue-500 text-white py-2 rounded hover:bg-blue-600">
+                            Profil speichern
+                        </button>
+                        <button onclick="testCalibration()"
+                                class="flex-1 bg-gray-500 text-white py-2 rounded hover:bg-gray-600">
+                            Test-Entzerrung
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold mb-4">Vorschau</h2>
+
+                <div id="preview-container" class="border rounded bg-gray-100 flex items-center justify-center" style="min-height: 400px;">
+                    <p class="text-gray-500">Wähle ein Bild zur Vorschau</p>
+                </div>
+
+                <div class="mt-4 flex gap-2">
+                    <button onclick="showOriginal()" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm">
+                        Original
+                    </button>
+                    <button onclick="showUndistorted()" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm">
+                        Entzerrt
+                    </button>
+                    <button onclick="showDetection()" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm">
+                        Erkennung
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tab 4: Gespeicherte Profile -->
+    <div id="panel-profiles" class="tab-panel hidden">
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-xl font-semibold mb-4">Gespeicherte Lens-Profile</h2>
+
+            <div id="profiles-list" class="space-y-3">
+                <!-- Profiles will be loaded here -->
+                <p class="text-gray-500 text-center py-8">Profile werden geladen...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tab 5: Profil testen -->
+    <div id="panel-test" class="tab-panel hidden">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Linke Spalte: Einstellungen -->
+            <div>
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-xl font-semibold mb-4">Profil testen</h2>
+                    <p class="text-gray-600 text-sm mb-4">Teste Lens-Profile mit Screenshots aus deinen Videos.</p>
+
+                    <!-- Video auswählen -->
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Video auswählen</label>
+                            <select id="test-video-select" class="w-full border rounded px-3 py-2" onchange="loadTestScreenshots()">
+                                <option value="">-- Video wählen --</option>
+                            </select>
+                        </div>
+
+                        <!-- Screenshot auswählen -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Screenshot</label>
+                            <div id="test-screenshot-select" class="text-gray-500 text-sm">
+                                Wähle zuerst ein Video
+                            </div>
+                        </div>
+
+                        <!-- Lens Profil auswählen -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Lens-Profil</label>
+                            <select id="test-profile-select" class="w-full border rounded px-3 py-2">
+                                <option value="">-- Profil wählen --</option>
+                            </select>
+                        </div>
+
+                        <!-- Balance Slider -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                                Balance: <span id="balance-value">0.5</span>
+                            </label>
+                            <input type="range" id="test-balance" min="0" max="1" step="0.1" value="0.5"
+                                   class="w-full" onchange="document.getElementById('balance-value').textContent = this.value">
+                            <p class="text-xs text-gray-500">0 = Alle Pixel gültig, 1 = Originalformat erhalten</p>
+                        </div>
+
+                        <button onclick="runLensTest()" id="test-btn"
+                                class="w-full bg-purple-500 text-white py-3 rounded-lg hover:bg-purple-600 font-medium disabled:bg-gray-300">
+                            Entzerrung testen
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Profil-Info -->
+                <div id="profile-info" class="mt-4 bg-gray-50 rounded-lg p-4 hidden">
+                    <h4 class="font-medium text-sm mb-2">Profil-Details</h4>
+                    <div class="text-xs space-y-1 font-mono text-gray-600">
+                        <p>Auflösung: <span id="profile-res">-</span></p>
+                        <p>Fehler: <span id="profile-error">-</span></p>
+                        <p>k1-k4: <span id="profile-distortion">-</span></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mittlere + Rechte Spalte: Bildvergleich -->
+            <div class="lg:col-span-2">
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-xl font-semibold mb-4">Vergleich: Original vs. Entzerrt</h2>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <!-- Original -->
+                        <div>
+                            <p class="text-sm font-medium text-gray-700 mb-2">Original</p>
+                            <div id="test-original" class="border rounded bg-gray-100 flex items-center justify-center" style="min-height: 300px;">
+                                <p class="text-gray-500 text-sm">Wähle einen Screenshot</p>
+                            </div>
+                        </div>
+
+                        <!-- Entzerrt -->
+                        <div>
+                            <p class="text-sm font-medium text-gray-700 mb-2">Entzerrt</p>
+                            <div id="test-undistorted" class="border rounded bg-gray-100 flex items-center justify-center" style="min-height: 300px;">
+                                <p class="text-gray-500 text-sm">Klicke "Entzerrung testen"</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Info-Box -->
+                    <div class="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded text-sm">
+                        <p class="font-medium text-yellow-800">Worauf achten?</p>
+                        <ul class="text-yellow-700 mt-1 text-xs space-y-1">
+                            <li>• Gerade Linien (Bandenrand, Tor) sollten nach Entzerrung gerade sein</li>
+                            <li>• Bei korrekter Kalibrierung: Keine Fischaugen-Wölbung mehr</li>
+                            <li>• Wenn schlimmer: Profil passt nicht zur Video-Einstellung (FOV, Auflösung)</li>
+                        </ul>
+                    </div>
+
+                    <!-- Eigenes Bild hochladen -->
+                    <div class="mt-4 pt-4 border-t">
+                        <p class="text-sm font-medium text-gray-700 mb-2">Oder eigenes Bild hochladen:</p>
+                        <input type="file" id="test-custom-image" accept="image/*"
+                               class="text-sm" onchange="loadCustomTestImage(event)">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.tab-panel.hidden { display: none; }
+.tab-btn.active { border-color: rgb(59, 130, 246); color: rgb(37, 99, 235); }
+.tab-btn:not(.active) { border-color: transparent; }
+
+#drop-zone.drag-over {
+    border-color: rgb(59, 130, 246);
+    background-color: rgb(239, 246, 255);
+}
+
+.image-thumb {
+    position: relative;
+}
+.image-thumb .status-badge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+}
+.image-thumb .remove-btn {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+.image-thumb:hover .remove-btn {
+    opacity: 1;
+}
+</style>
+
+<script>
+// State
+let uploadedImages = [];
+let calibrationResult = null;
+let imageIdCounter = 0;
+
+// === Server-Side Persistence ===
+// Bilder werden auf dem Server gespeichert statt im LocalStorage (wegen Größenlimit)
+
+async function saveImagesToStorage() {
+    // Bilder werden einzeln beim Upload gespeichert, nicht hier
+    console.log(`${uploadedImages.length} images in memory`);
+}
+
+async function loadImagesFromStorage() {
+    try {
+        const response = await fetch('/calibration/api/lens/temp-images');
+        if (response.ok) {
+            const data = await response.json();
+            if (data.images && data.images.length > 0) {
+                uploadedImages = data.images.map(img => ({
+                    id: img.id,
+                    name: img.name,
+                    dataUrl: img.dataUrl,
+                    detected: img.detected,
+                    corners: img.corners,
+                    fileBlob: null,
+                    processing: false
+                }));
+                // Update imageIdCounter
+                const maxId = Math.max(0, ...uploadedImages.map(img => {
+                    const match = img.id.match(/img_(\d+)/);
+                    return match ? parseInt(match[1]) : 0;
+                }));
+                imageIdCounter = maxId;
+                console.log(`Loaded ${uploadedImages.length} images from server`);
+                return true;
+            }
+        }
+    } catch (e) {
+        console.warn('Could not load from server:', e);
+    }
+    return false;
+}
+
+async function saveImageToServer(imageData) {
+    try {
+        const response = await fetch('/calibration/api/lens/temp-images', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                id: imageData.id,
+                name: imageData.name,
+                dataUrl: imageData.dataUrl,
+                detected: imageData.detected,
+                corners: imageData.corners
+            })
+        });
+        if (!response.ok) {
+            console.warn('Failed to save image to server');
+        }
+    } catch (e) {
+        console.warn('Could not save to server:', e);
+    }
+}
+
+async function removeImageFromServer(imageId) {
+    try {
+        await fetch(`/calibration/api/lens/temp-images/${imageId}`, {
+            method: 'DELETE'
+        });
+    } catch (e) {
+        console.warn('Could not remove from server:', e);
+    }
+}
+
+async function clearStoredImages() {
+    try {
+        await fetch('/calibration/api/lens/temp-images', {
+            method: 'DELETE'
+        });
+        console.log('Cleared stored images on server');
+    } catch (e) {
+        console.warn('Could not clear server storage:', e);
+    }
+}
+
+// Tab switching
+function showTab(tabName) {
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
+    document.querySelectorAll('.tab-btn').forEach(b => {
+        b.classList.remove('border-blue-500', 'text-blue-600');
+        b.classList.add('border-transparent', 'text-gray-500');
+    });
+
+    document.getElementById('panel-' + tabName).classList.remove('hidden');
+    const tabBtn = document.getElementById('tab-' + tabName);
+    tabBtn.classList.remove('border-transparent', 'text-gray-500');
+    tabBtn.classList.add('border-blue-500', 'text-blue-600');
+
+    if (tabName === 'profiles') {
+        loadProfiles();
+    }
+}
+
+// Checkerboard Preview
+function updateCheckerboardPreview() {
+    const canvas = document.getElementById('preview-canvas');
+    const ctx = canvas.getContext('2d');
+    const width = parseInt(document.getElementById('board-width').value) + 1;
+    const height = parseInt(document.getElementById('board-height').value) + 1;
+
+    const squareSize = Math.min(canvas.width / width, canvas.height / height) * 0.9;
+    const offsetX = (canvas.width - width * squareSize) / 2;
+    const offsetY = (canvas.height - height * squareSize) / 2;
+
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            if ((x + y) % 2 === 0) {
+                ctx.fillStyle = 'black';
+                ctx.fillRect(offsetX + x * squareSize, offsetY + y * squareSize, squareSize, squareSize);
+            }
+        }
+    }
+}
+
+document.getElementById('board-width').addEventListener('change', updateCheckerboardPreview);
+document.getElementById('board-height').addEventListener('change', updateCheckerboardPreview);
+updateCheckerboardPreview();
+
+// Generate Checkerboard PDF
+async function generateCheckerboard() {
+    const width = document.getElementById('board-width').value;
+    const height = document.getElementById('board-height').value;
+    const squareSize = document.getElementById('square-size').value;
+    const paperSize = document.getElementById('paper-size').value;
+
+    try {
+        const response = await fetch('/calibration/api/lens/checkerboard', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                inner_width: parseInt(width),
+                inner_height: parseInt(height),
+                square_size_mm: parseInt(squareSize),
+                paper_size: paperSize
+            })
+        });
+
+        if (response.ok) {
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `checkerboard_${width}x${height}.pdf`;
+            a.click();
+            window.URL.revokeObjectURL(url);
+        } else {
+            const error = await response.json();
+            alert('Fehler: ' + error.error);
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+
+// File Upload
+function handleDragOver(e) {
+    e.preventDefault();
+    document.getElementById('drop-zone').classList.add('drag-over');
+}
+
+function handleDragLeave(e) {
+    e.preventDefault();
+    document.getElementById('drop-zone').classList.remove('drag-over');
+}
+
+function handleDrop(e) {
+    e.preventDefault();
+    document.getElementById('drop-zone').classList.remove('drag-over');
+    const files = e.dataTransfer.files;
+    handleFiles(files);
+}
+
+function handleFileSelect(e) {
+    handleFiles(e.target.files);
+}
+
+document.getElementById('drop-zone').addEventListener('click', () => {
+    document.getElementById('file-input').click();
+});
+
+async function handleFiles(files) {
+    // Convert FileList to Array to avoid issues
+    const fileArray = Array.from(files).filter(f => f.type.startsWith('image/'));
+
+    console.log(`Processing ${fileArray.length} files...`);
+
+    // Process files sequentially to avoid race conditions
+    for (const file of fileArray) {
+        try {
+            const dataUrl = await readFileAsDataURL(file);
+            const imageId = 'img_' + (++imageIdCounter);
+
+            // Create a copy of the file data to prevent loss
+            const imageData = {
+                id: imageId,
+                name: file.name,
+                dataUrl: dataUrl,
+                fileBlob: file,  // Keep reference to file
+                detected: null,
+                corners: null,
+                processing: true
+            };
+
+            uploadedImages.push(imageData);
+            renderUploadedImages();
+            updateImageCount();
+
+            console.log(`Added image ${imageId}: ${file.name}`);
+
+            // Detect checkerboard
+            await detectCheckerboard(imageData);
+            imageData.processing = false;
+            renderUploadedImages();
+
+            // Auf Server speichern (mit detection result)
+            await saveImageToServer(imageData);
+
+        } catch (err) {
+            console.error(`Error processing file ${file.name}:`, err);
+        }
+    }
+
+    console.log(`Finished processing. Total images: ${uploadedImages.length}`);
+}
+
+// Helper function to read file as data URL
+function readFileAsDataURL(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = (e) => reject(e);
+        reader.readAsDataURL(file);
+    });
+}
+
+function renderUploadedImages() {
+    const container = document.getElementById('uploaded-images');
+    container.innerHTML = uploadedImages.map(img => {
+        let statusClass = 'bg-gray-400';
+        let statusIcon = '?';
+
+        if (img.processing) {
+            statusClass = 'bg-yellow-500 animate-pulse';
+            statusIcon = '⏳';
+        } else if (img.detected === true) {
+            statusClass = 'bg-green-500';
+            statusIcon = '✓';
+        } else if (img.detected === false) {
+            statusClass = 'bg-red-500';
+            statusIcon = '✗';
+        }
+
+        return `
+            <div class="image-thumb relative rounded overflow-hidden border" data-id="${img.id}">
+                <img src="${img.dataUrl}" class="w-full h-24 object-cover cursor-pointer" onclick="selectImage('${img.id}')">
+                <div class="status-badge ${statusClass}">
+                    ${statusIcon}
+                </div>
+                <button class="remove-btn bg-red-500 text-white w-5 h-5 rounded-full text-xs"
+                        onclick="event.stopPropagation(); removeImage('${img.id}')">✕</button>
+            </div>
+        `;
+    }).join('');
+}
+
+function updateImageCount() {
+    const total = uploadedImages.length;
+    const detected = uploadedImages.filter(i => i.detected === true).length;
+    document.getElementById('image-count').textContent = `${total} Fotos hochgeladen`;
+    document.getElementById('detection-status').textContent = detected > 0 ? `(${detected} mit erkanntem Muster)` : '';
+
+    // Enable calibration button if enough images
+    document.getElementById('calibrate-btn').disabled = detected < 3;
+}
+
+async function detectCheckerboard(imageData) {
+    const cbWidth = document.getElementById('cb-width').value;
+    const cbHeight = document.getElementById('cb-height').value;
+
+    // Blob erstellen aus dataUrl falls fileBlob nicht vorhanden
+    let fileToSend = imageData.fileBlob;
+    if (!fileToSend && imageData.dataUrl) {
+        fileToSend = dataURLtoBlob(imageData.dataUrl);
+    }
+
+    if (!fileToSend) {
+        console.error('No file data available for detection');
+        imageData.detected = false;
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('image', fileToSend, imageData.name || 'image.jpg');
+    formData.append('board_width', cbWidth);
+    formData.append('board_height', cbHeight);
+
+    try {
+        console.log(`Detecting checkerboard in ${imageData.name}, board size: ${cbWidth}x${cbHeight}`);
+        const response = await fetch('/calibration/api/lens/detect', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+        console.log(`Detection result for ${imageData.name}: detected=${result.detected}`);
+        imageData.detected = result.detected;
+        imageData.corners = result.corners;
+        renderUploadedImages();
+        updateImageCount();
+    } catch (err) {
+        console.error(`Detection error for ${imageData.name}:`, err);
+        imageData.detected = false;
+        renderUploadedImages();
+        updateImageCount();
+    }
+}
+
+function removeImage(id) {
+    console.log(`Removing image: ${id}`);
+    const before = uploadedImages.length;
+    uploadedImages = uploadedImages.filter(i => String(i.id) !== String(id));
+    const after = uploadedImages.length;
+    console.log(`Images before: ${before}, after: ${after}`);
+    renderUploadedImages();
+    updateImageCount();
+    removeImageFromServer(id);  // Auch vom Server löschen
+}
+
+function clearAllImages() {
+    if (confirm('Alle Bilder entfernen?')) {
+        uploadedImages = [];
+        renderUploadedImages();
+        updateImageCount();
+        clearStoredImages();  // Auch vom Server löschen
+    }
+}
+
+async function redetectAllImages() {
+    if (uploadedImages.length === 0) {
+        alert('Keine Bilder zum Erkennen vorhanden');
+        return;
+    }
+
+    const statusEl = document.getElementById('detection-status');
+    statusEl.textContent = 'Erkenne Schachbretter...';
+    statusEl.classList.remove('text-green-600');
+    statusEl.classList.add('text-yellow-600');
+
+    let processed = 0;
+    for (const img of uploadedImages) {
+        img.processing = true;
+        img.detected = null;
+        renderUploadedImages();
+
+        await detectCheckerboard(img);
+        img.processing = false;
+
+        processed++;
+        statusEl.textContent = `Erkannt: ${processed}/${uploadedImages.length}`;
+    }
+
+    renderUploadedImages();
+    updateImageCount();
+
+    const detected = uploadedImages.filter(i => i.detected === true).length;
+    statusEl.textContent = `Fertig: ${detected} von ${uploadedImages.length} erkannt`;
+    statusEl.classList.remove('text-yellow-600');
+    statusEl.classList.add(detected > 0 ? 'text-green-600' : 'text-red-600');
+}
+
+function selectImage(id) {
+    const img = uploadedImages.find(i => String(i.id) === String(id));
+    if (img) {
+        const container = document.getElementById('preview-container');
+        container.innerHTML = `<img src="${img.dataUrl}" class="max-w-full max-h-full object-contain">`;
+    }
+}
+
+// Calibration
+async function startCalibration() {
+    const detectedImages = uploadedImages.filter(i => i.detected === true);
+    if (detectedImages.length < 3) {
+        alert('Mindestens 3 Bilder mit erkanntem Muster erforderlich');
+        return;
+    }
+
+    console.log(`Starting calibration with ${detectedImages.length} images`);
+
+    document.getElementById('calibration-progress').classList.remove('hidden');
+    document.getElementById('calibration-results').classList.add('hidden');
+    document.getElementById('calibrate-btn').disabled = true;
+    document.getElementById('progress-detail').textContent = `Verarbeite ${detectedImages.length} Bilder...`;
+
+    const formData = new FormData();
+
+    // Use fileBlob (which is the actual File object)
+    for (const img of detectedImages) {
+        if (img.fileBlob) {
+            formData.append('images', img.fileBlob, img.name);
+            console.log(`Added file: ${img.name}`);
+        } else if (img.dataUrl) {
+            // Convert dataUrl back to blob if fileBlob is missing
+            const blob = dataURLtoBlob(img.dataUrl);
+            formData.append('images', blob, img.name);
+            console.log(`Added blob from dataUrl: ${img.name}`);
+        }
+    }
+
+    formData.append('board_width', document.getElementById('cb-width').value);
+    formData.append('board_height', document.getElementById('cb-height').value);
+    formData.append('square_size', document.getElementById('cb-square-size').value);
+    formData.append('lens_type', document.getElementById('lens-type').value);
+    formData.append('camera_name', document.getElementById('camera-name').value);
+
+    try {
+        const response = await fetch('/calibration/api/lens/calibrate', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            calibrationResult = result;
+            showCalibrationResults(result);
+        } else {
+            alert('Kalibrierung fehlgeschlagen: ' + result.error);
+            document.getElementById('calibration-progress').classList.add('hidden');
+        }
+    } catch (err) {
+        console.error('Calibration error:', err);
+        alert('Fehler: ' + err.message);
+        document.getElementById('calibration-progress').classList.add('hidden');
+    } finally {
+        document.getElementById('calibrate-btn').disabled = false;
+    }
+}
+
+// Helper function to convert dataURL to Blob
+function dataURLtoBlob(dataURL) {
+    const parts = dataURL.split(',');
+    const mime = parts[0].match(/:(.*?);/)[1];
+    const b64 = atob(parts[1]);
+    const n = b64.length;
+    const u8arr = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+        u8arr[i] = b64.charCodeAt(i);
+    }
+    return new Blob([u8arr], { type: mime });
+}
+
+function showCalibrationResults(result) {
+    document.getElementById('calibration-progress').classList.add('hidden');
+    document.getElementById('calibration-results').classList.remove('hidden');
+
+    document.getElementById('result-error').textContent = result.reprojection_error.toFixed(4) + ' px';
+    document.getElementById('result-images').textContent = result.images_used + ' / ' + result.images_total;
+    document.getElementById('result-focal').textContent =
+        `${result.camera_matrix[0][0].toFixed(1)}, ${result.camera_matrix[1][1].toFixed(1)}`;
+    document.getElementById('result-center').textContent =
+        `${result.camera_matrix[0][2].toFixed(1)}, ${result.camera_matrix[1][2].toFixed(1)}`;
+    document.getElementById('result-distortion').textContent =
+        result.distortion_coeffs.slice(0, 4).map(d => d.toFixed(4)).join(', ');
+
+    // Update status
+    const quality = result.reprojection_error < 0.5 ? 'Ausgezeichnet' :
+                    result.reprojection_error < 1.0 ? 'Gut' : 'Akzeptabel';
+    document.getElementById('status-icon').textContent = '✅';
+    document.getElementById('status-text').textContent = 'Kalibrierung erfolgreich';
+    document.getElementById('status-detail').textContent = `Qualität: ${quality}`;
+}
+
+async function saveProfile() {
+    if (!calibrationResult) return;
+
+    const name = prompt('Name für das Profil:', document.getElementById('camera-name').value);
+    if (!name) return;
+
+    try {
+        const response = await fetch('/calibration/api/lens/profiles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: name,
+                camera_name: document.getElementById('camera-name').value,
+                lens_type: document.getElementById('lens-type').value,
+                calibration_data: calibrationResult
+            })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            alert('Profil gespeichert!');
+            showTab('profiles');
+        } else {
+            alert('Fehler: ' + result.error);
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+
+async function loadProfiles() {
+    try {
+        const response = await fetch('/calibration/api/lens/profiles');
+        const profiles = await response.json();
+
+        const container = document.getElementById('profiles-list');
+        if (profiles.length === 0) {
+            container.innerHTML = '<p class="text-gray-500 text-center py-8">Noch keine Profile gespeichert</p>';
+            return;
+        }
+
+        container.innerHTML = profiles.map(p => `
+            <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                <div>
+                    <p class="font-medium">${p.name}</p>
+                    <p class="text-sm text-gray-500">
+                        ${p.camera_name || 'Unbekannt'} |
+                        ${p.resolution ? p.resolution.width + 'x' + p.resolution.height : ''} |
+                        Fehler: ${p.reprojection_error ? p.reprojection_error.toFixed(3) + 'px' : '-'}
+                    </p>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="deleteProfile('${p.id}')" class="text-red-500 hover:text-red-700 text-sm">
+                        Löschen
+                    </button>
+                </div>
+            </div>
+        `).join('');
+    } catch (err) {
+        document.getElementById('profiles-list').innerHTML =
+            '<p class="text-red-500 text-center py-8">Fehler beim Laden der Profile</p>';
+    }
+}
+
+async function deleteProfile(id) {
+    if (!confirm('Profil wirklich löschen?')) return;
+
+    try {
+        const response = await fetch(`/calibration/api/lens/profiles/${id}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            loadProfiles();
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+
+function showOriginal() {
+    // Show original image in preview
+}
+
+function showUndistorted() {
+    // Show undistorted image
+}
+
+function showDetection() {
+    // Show detection overlay
+}
+
+function testCalibration() {
+    // Show test undistortion
+}
+
+// === Test Tab Functions ===
+let testVideos = [];
+let testProfiles = [];
+let selectedTestScreenshot = null;
+let customTestImage = null;
+
+async function loadTestVideos() {
+    try {
+        const response = await fetch('/api/videos');
+        testVideos = await response.json();
+
+        const select = document.getElementById('test-video-select');
+        select.innerHTML = '<option value="">-- Video wählen --</option>' +
+            testVideos.map(v => `<option value="${v.id}">${v.filename || v.original_filename} (${v.width}x${v.height})</option>`).join('');
+    } catch (err) {
+        console.error('Error loading videos:', err);
+    }
+}
+
+async function loadTestProfiles() {
+    try {
+        const response = await fetch('/calibration/api/lens/profiles');
+        testProfiles = await response.json();
+
+        const select = document.getElementById('test-profile-select');
+        select.innerHTML = '<option value="">-- Profil wählen --</option>' +
+            testProfiles.map(p => {
+                const res = p.resolution ? `${p.resolution.width}x${p.resolution.height}` : '?';
+                return `<option value="${p.id}">${p.name} (${res})</option>`;
+            }).join('');
+
+        // Event listener für Profil-Info
+        select.addEventListener('change', showProfileInfo);
+    } catch (err) {
+        console.error('Error loading profiles:', err);
+    }
+}
+
+async function loadTestScreenshots() {
+    const videoId = document.getElementById('test-video-select').value;
+    const container = document.getElementById('test-screenshot-select');
+
+    if (!videoId) {
+        container.innerHTML = '<p class="text-gray-500 text-sm">Wähle zuerst ein Video</p>';
+        return;
+    }
+
+    container.innerHTML = '<p class="text-gray-500 text-sm">Lade Screenshots...</p>';
+
+    try {
+        // Erst bestehende Screenshots laden
+        const response = await fetch(`/calibration/api/videos/${videoId}/screenshots`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ num_screenshots: 0 })  // 0 = nur existierende laden
+        });
+
+        const data = await response.json();
+
+        if (data.screenshots && data.screenshots.length > 0) {
+            container.innerHTML = `
+                <div class="grid grid-cols-3 gap-2 max-h-40 overflow-y-auto">
+                    ${data.screenshots.map((s, i) => {
+                        // s kann ein String (Pfad) oder ein Objekt {filename, path, ...} sein
+                        const path = typeof s === 'string' ? s : s.path;
+                        const filename = typeof s === 'string' ? s.split('/').pop() : s.filename;
+                        const isSelected = selectedTestScreenshot === path;
+                        return `
+                            <div class="cursor-pointer border rounded p-1 hover:border-blue-500 ${isSelected ? 'border-blue-500 ring-2 ring-blue-300' : ''}"
+                                 onclick="selectTestScreenshot('${path}', '${videoId}')">
+                                <img src="/calibration/screenshot/${videoId}/screenshots/${filename}" class="w-full h-12 object-cover rounded">
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+                <button onclick="generateNewTestScreenshot('${videoId}')" class="mt-2 text-xs text-blue-500 hover:underline">
+                    + Neuen Screenshot generieren
+                </button>
+            `;
+        } else {
+            container.innerHTML = `
+                <p class="text-gray-500 text-sm">Keine Screenshots vorhanden</p>
+                <button onclick="generateNewTestScreenshot('${videoId}')" class="mt-2 text-sm text-blue-500 hover:underline">
+                    Screenshots generieren
+                </button>
+            `;
+        }
+    } catch (err) {
+        container.innerHTML = `<p class="text-red-500 text-sm">Fehler: ${err.message}</p>`;
+    }
+}
+
+async function generateNewTestScreenshot(videoId) {
+    const container = document.getElementById('test-screenshot-select');
+    container.innerHTML = '<p class="text-yellow-600 text-sm">Generiere Screenshots...</p>';
+
+    try {
+        const response = await fetch(`/calibration/api/videos/${videoId}/screenshots`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ num_screenshots: 5 })
+        });
+
+        if (response.ok) {
+            await loadTestScreenshots();
+        }
+    } catch (err) {
+        container.innerHTML = `<p class="text-red-500 text-sm">Fehler: ${err.message}</p>`;
+    }
+}
+
+function selectTestScreenshot(path, videoId) {
+    selectedTestScreenshot = path;
+    customTestImage = null;  // Reset custom image
+
+    // Visual feedback
+    loadTestScreenshots();
+
+    // Show original image - path kann absolut oder relativ sein
+    let filename = path;
+    if (path.includes('/')) {
+        filename = path.split('/').pop();
+    }
+    const imgUrl = `/calibration/screenshot/${videoId}/screenshots/${filename}`;
+    document.getElementById('test-original').innerHTML = `<img src="${imgUrl}" class="max-w-full max-h-full object-contain">`;
+    document.getElementById('test-undistorted').innerHTML = '<p class="text-gray-500 text-sm">Klicke "Entzerrung testen"</p>';
+}
+
+function loadCustomTestImage(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        customTestImage = e.target.result;
+        selectedTestScreenshot = null;  // Reset screenshot selection
+
+        document.getElementById('test-original').innerHTML = `<img src="${customTestImage}" class="max-w-full max-h-full object-contain">`;
+        document.getElementById('test-undistorted').innerHTML = '<p class="text-gray-500 text-sm">Klicke "Entzerrung testen"</p>';
+    };
+    reader.readAsDataURL(file);
+}
+
+function showProfileInfo() {
+    const profileId = document.getElementById('test-profile-select').value;
+    const infoBox = document.getElementById('profile-info');
+
+    if (!profileId) {
+        infoBox.classList.add('hidden');
+        return;
+    }
+
+    const profile = testProfiles.find(p => p.id === profileId);
+    if (!profile) return;
+
+    infoBox.classList.remove('hidden');
+    document.getElementById('profile-res').textContent =
+        profile.resolution ? `${profile.resolution.width}x${profile.resolution.height}` : '-';
+    document.getElementById('profile-error').textContent =
+        profile.reprojection_error ? profile.reprojection_error.toFixed(4) + ' px' : '-';
+
+    const dist = profile.fisheye_params?.distortion_coeffs || [];
+    document.getElementById('profile-distortion').textContent =
+        dist.slice(0, 4).map(d => d.toFixed(4)).join(', ') || '-';
+}
+
+async function runLensTest() {
+    const profileId = document.getElementById('test-profile-select').value;
+    const balance = parseFloat(document.getElementById('test-balance').value);
+
+    if (!profileId) {
+        alert('Bitte wähle ein Lens-Profil');
+        return;
+    }
+
+    if (!selectedTestScreenshot && !customTestImage) {
+        alert('Bitte wähle einen Screenshot oder lade ein Bild hoch');
+        return;
+    }
+
+    const undistortedContainer = document.getElementById('test-undistorted');
+    undistortedContainer.innerHTML = '<p class="text-yellow-600 animate-pulse">Entzerren...</p>';
+
+    try {
+        let response;
+
+        if (customTestImage) {
+            // Für benutzerdefinierte Bilder: Senden als Base64
+            response = await fetch('/calibration/api/lens/test-undistort', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    image_data: customTestImage,
+                    lens_profile_id: profileId,
+                    balance: balance
+                })
+            });
+        } else {
+            // Für Video-Screenshots: Nutze bestehenden Endpoint
+            const videoId = document.getElementById('test-video-select').value;
+            response = await fetch(`/calibration/api/videos/${videoId}/undistort-screenshot`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    lens_profile_id: profileId,
+                    screenshot_path: selectedTestScreenshot,
+                    balance: balance
+                })
+            });
+        }
+
+        const result = await response.json();
+
+        if (result.success || result.undistorted_path) {
+            // Bild anzeigen mit Cache-Buster
+            // Der API-Endpunkt gibt absoluten Pfad zurück, wir brauchen aber URL
+            const videoId = document.getElementById('test-video-select').value;
+            const cacheBuster = Date.now();
+            // Nutze die Screenshot-Route für das entzerrte Bild
+            const imgUrl = `/calibration/screenshot/${videoId}/undistorted_frame.jpg?t=${cacheBuster}`;
+            undistortedContainer.innerHTML = `<img src="${imgUrl}" class="max-w-full max-h-full object-contain">`;
+        } else if (result.image_data) {
+            // Base64-Bild direkt anzeigen
+            undistortedContainer.innerHTML = `<img src="${result.image_data}" class="max-w-full max-h-full object-contain">`;
+        } else {
+            undistortedContainer.innerHTML = `<p class="text-red-500 text-sm">Fehler: ${result.error || 'Unbekannt'}</p>`;
+        }
+    } catch (err) {
+        undistortedContainer.innerHTML = `<p class="text-red-500 text-sm">Fehler: ${err.message}</p>`;
+    }
+}
+
+// === Initialisierung beim Laden der Seite ===
+document.addEventListener('DOMContentLoaded', async function() {
+    // Gespeicherte Bilder vom Server laden
+    const loaded = await loadImagesFromStorage();
+    if (loaded) {
+        renderUploadedImages();
+        updateImageCount();
+        console.log('Restored images from previous session');
+
+        // Hinweis anzeigen wenn Bilder wiederhergestellt wurden
+        if (uploadedImages.length > 0) {
+            const statusEl = document.getElementById('detection-status');
+            if (statusEl) {
+                // Prüfen ob Bilder ohne Detection-Status vorhanden sind
+                const needsDetection = uploadedImages.filter(i => i.detected === null || i.detected === undefined).length;
+                if (needsDetection > 0) {
+                    statusEl.innerHTML = `${uploadedImages.length} Bilder geladen - <a href="#" onclick="redetectAllImages(); return false;" class="underline text-blue-500">Klicke hier um Erkennung zu starten</a>`;
+                } else {
+                    const detected = uploadedImages.filter(i => i.detected === true).length;
+                    statusEl.textContent = `(${detected} von ${uploadedImages.length} mit erkanntem Muster)`;
+                    statusEl.classList.add('text-green-600');
+                }
+            }
+        }
+    }
+
+    // Test-Tab Daten vorladen
+    loadTestVideos();
+    loadTestProfiles();
+});
+</script>
+{% endblock %}

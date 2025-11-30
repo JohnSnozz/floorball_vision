@@ -8,6 +8,7 @@ import io
 import zipfile
 import shutil
 import yaml
+import requests
 from pathlib import Path
 from typing import Optional
 
@@ -73,6 +74,9 @@ class YOLOExporter:
         except zipfile.BadZipFile:
             raise LabelStudioError("Export ist keine gültige ZIP-Datei")
 
+        # Bilder von Label Studio holen und kopieren
+        self._copy_images_from_label_studio(project_id, export_path)
+
         # Struktur validieren und anpassen
         result = self._organize_yolo_structure(export_path)
 
@@ -82,6 +86,67 @@ class YOLOExporter:
             "labels": result["labels"],
             "classes": result["classes"],
         }
+
+    def _copy_images_from_label_studio(self, project_id: int, export_path: Path) -> int:
+        """
+        Kopiert die Bilder von Label Studio zum Export-Ordner.
+
+        Versucht zuerst aus dem lokalen Label Studio Storage zu kopieren,
+        falls das nicht funktioniert, werden die Bilder via API heruntergeladen.
+
+        Args:
+            project_id: Label Studio Projekt-ID
+            export_path: Ziel-Pfad für den Export
+
+        Returns:
+            Anzahl kopierter Bilder
+        """
+        images_dir = export_path / "images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        labels_dir = export_path / "labels"
+
+        # Label-Dateien als Referenz für benötigte Bilder
+        label_files = list(labels_dir.glob("*.txt")) if labels_dir.exists() else []
+
+        if not label_files:
+            return 0
+
+        # Label Studio lokaler Storage-Pfad
+        # Standard: ~/.local/share/label-studio/media/upload/{project_id}/
+        local_storage = Path.home() / ".local/share/label-studio/media/upload" / str(project_id)
+
+        copied = 0
+
+        for label_file in label_files:
+            # Label-Dateiname ohne .txt = Bild-Dateiname
+            base_name = label_file.stem
+
+            # Mögliche Bild-Endungen
+            for ext in [".jpg", ".jpeg", ".png"]:
+                image_name = base_name + ext
+
+                # Zuerst im lokalen Storage suchen
+                local_image = local_storage / image_name
+                if local_image.exists():
+                    shutil.copy2(local_image, images_dir / image_name)
+                    copied += 1
+                    break
+
+                # Alternative: Bild via API herunterladen
+                # (nur falls lokaler Storage nicht funktioniert)
+
+        # Falls keine Bilder im lokalen Storage gefunden,
+        # versuche alle Bilder aus dem Storage zu kopieren
+        if copied == 0 and local_storage.exists():
+            for img_file in local_storage.iterdir():
+                if img_file.suffix.lower() in [".jpg", ".jpeg", ".png"]:
+                    # Prüfen ob passendes Label existiert
+                    label_name = img_file.stem + ".txt"
+                    if (labels_dir / label_name).exists():
+                        shutil.copy2(img_file, images_dir / img_file.name)
+                        copied += 1
+
+        return copied
 
     def _organize_yolo_structure(self, export_path: Path) -> dict:
         """

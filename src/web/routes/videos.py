@@ -175,3 +175,25 @@ def delete_video(video_id):
     db.session.commit()
 
     return jsonify({"message": "Video gelöscht"}), 200
+
+
+@videos_bp.route("/<video_id>/thumbnail", methods=["GET"])
+def thumbnail(video_id):
+    """Thumbnail für ein Video abrufen."""
+    from flask import send_file, abort
+
+    video = db.session.get(Video, video_id)
+    if not video:
+        abort(404)
+
+    if not video.file_path:
+        abort(404)
+
+    # Thumbnail-Pfad: video_name_thumb.jpg
+    base_path = video.file_path.rsplit(".", 1)[0]
+    thumbnail_path = base_path + "_thumb.jpg"
+
+    if not os.path.exists(thumbnail_path):
+        abort(404)
+
+    return send_file(thumbnail_path, mimetype="image/jpeg")

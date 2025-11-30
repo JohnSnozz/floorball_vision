@@ -293,6 +293,7 @@ def api_add_batch_and_open():
     JSON Body:
         project_id: Projekt UUID
         video_id: Video UUID
+        batch_name: Name für den Batch (optional)
         num_frames: Anzahl Frames (default: 100)
 
     Returns:
@@ -302,6 +303,7 @@ def api_add_batch_and_open():
 
     project_id = data.get("project_id")
     video_id = data.get("video_id")
+    batch_name = data.get("batch_name", "").strip()
     num_frames = data.get("num_frames", 100)
 
     if not project_id:
@@ -322,6 +324,16 @@ def api_add_batch_and_open():
     if not video.file_path:
         return jsonify({"error": "Video hat keinen Dateipfad"}), 400
 
+    # Batch-Name generieren falls nicht angegeben
+    if not batch_name:
+        # Kurzer Video-Name + Batch-Nummer
+        video_short = (video.original_filename or video.filename or "video")[:20]
+        video_short = "".join(c if c.isalnum() or c in "-_" else "_" for c in video_short)
+        batch_name = f"{video_short}_batch{len(project.batches) + 1}"
+
+    # Name bereinigen
+    batch_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in batch_name)
+
     try:
         sync = LabelingSync()
 
@@ -329,7 +341,7 @@ def api_add_batch_and_open():
         batch_result = sync.extract_random_frames(
             video_path=video.file_path,
             num_frames=num_frames,
-            batch_id=f"v{str(video.id)[:8]}_{len(project.batches) + 1}"
+            batch_id=batch_name
         )
 
         # Frames zu Label Studio hochladen
@@ -348,7 +360,7 @@ def api_add_batch_and_open():
             # Gefilterten View erstellen
             view = client.create_filtered_view(
                 project_id=project.label_studio_id,
-                title=f"Batch {batch_result['batch_id']}",
+                title=batch_name,
                 task_ids=task_ids
             )
             view_id = view.get("id")
@@ -359,7 +371,7 @@ def api_add_batch_and_open():
         # Batch in DB speichern (mit View-ID)
         batch = LabelingBatch(
             project_id=project.id,
-            batch_id=batch_result["batch_id"],
+            batch_id=batch_name,
             num_frames=batch_result["total_extracted"],
             frames_path=batch_result["batch_dir"],
             task_ids=task_ids,
@@ -374,7 +386,7 @@ def api_add_batch_and_open():
 
         return jsonify({
             "success": True,
-            "batch_id": batch_result["batch_id"],
+            "batch_id": batch_name,
             "frames_extracted": batch_result["total_extracted"],
             "frames_uploaded": upload_result["uploaded"],
             "video_name": video.original_filename or video.filename,
@@ -391,6 +403,7 @@ def api_add_batch_and_open():
 def api_open_batch(batch_id):
     """
     Gibt die Label Studio URL für einen spezifischen Batch zurück.
+    Erstellt einen View/Tab falls noch keiner existiert.
     """
     batch = db.session.query(LabelingBatch).filter_by(batch_id=batch_id).first()
     if not batch:
@@ -403,26 +416,43 @@ def api_open_batch(batch_id):
     try:
         client = LabelStudioClient()
 
-        # View-ID verwenden falls vorhanden
+        # Prüfen ob View noch existiert (falls view_id vorhanden)
+        view_exists = False
         if batch.view_id:
+            try:
+                # Versuche den View abzurufen
+                client._request("GET", f"/dm/views/{batch.view_id}/")
+                view_exists = True
+            except:
+                # View existiert nicht mehr
+                batch.view_id = None
+
+        if view_exists and batch.view_id:
+            # Bestehenden View verwenden
             label_url = client.get_view_labeling_url(project.label_studio_id, batch.view_id)
         elif batch.task_ids and len(batch.task_ids) > 0:
-            # Fallback: View erstellen falls noch keiner existiert
+            # View erstellen mit gespeicherten Task-IDs
             view = client.create_filtered_view(
                 project_id=project.label_studio_id,
-                title=f"Batch {batch.batch_id}",
+                title=batch.batch_id,
                 task_ids=batch.task_ids
             )
             batch.view_id = view.get("id")
             db.session.commit()
             label_url = client.get_view_labeling_url(project.label_studio_id, batch.view_id)
         else:
+            # Keine Task-IDs gespeichert - versuche sie aus dem frames_path zu rekonstruieren
+            # indem wir die Bilder im Label Studio Projekt suchen
             label_url = client.get_labeling_url(project.label_studio_id)
+
+            # Hinweis: Für ältere Batches ohne task_ids können wir keinen
+            # gefilterten View erstellen
 
         return jsonify({
             "url": label_url,
             "batch_id": batch.batch_id,
-            "num_frames": batch.num_frames
+            "num_frames": batch.num_frames,
+            "has_view": batch.view_id is not None
         })
 
     except LabelStudioError as e:
@@ -435,16 +465,34 @@ def api_export_labels(project_id):
     Exportiert Labels aus Label Studio.
 
     Holt die Annotations und speichert sie im YOLO-Format.
+
+    JSON Body (optional):
+        export_name: Name für das exportierte Dataset
     """
     project = db.session.get(LabelingProject, project_id)
     if not project:
         return jsonify({"error": "Projekt nicht gefunden"}), 404
 
+    # Export-Name aus Request oder Default
+    data = request.get_json() or {}
+    export_name = data.get("export_name", "").strip()
+
+    # Wenn kein Name angegeben, Projekt-Titel verwenden
+    if not export_name:
+        export_name = project.title
+
+    # Name bereinigen (nur alphanumerisch, Bindestrich, Unterstrich)
+    export_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in export_name)
+
+    # Sicherstellen dass der Name nicht leer ist
+    if not export_name:
+        export_name = f"dataset_{project.label_studio_id}"
+
     try:
         exporter = YOLOExporter()
         result = exporter.export_project(
             project_id=project.label_studio_id,
-            export_name=f"project_{project.id}"
+            export_name=export_name
         )
 
         # Status aktualisieren
@@ -455,6 +503,7 @@ def api_export_labels(project_id):
         return jsonify({
             "success": True,
             "path": result["path"],
+            "export_name": export_name,
             "images": result["images"],
             "labels": result["labels"],
             "classes": result["classes"],

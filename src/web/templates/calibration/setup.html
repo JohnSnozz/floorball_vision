@@ -1,0 +1,1639 @@
+{% extends "base.html" %}
+
+{% block title %}Kalibrierung - {{ video.filename }}{% endblock %}
+
+{% block head %}
+<style>
+    .screenshot-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 1rem;
+    }
+    .screenshot-item {
+        cursor: pointer;
+        transition: all 0.2s;
+        border: 3px solid transparent;
+    }
+    .screenshot-item:hover {
+        transform: scale(1.02);
+        border-color: #3B82F6;
+    }
+    .screenshot-item.selected {
+        border-color: #10B981;
+        box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3);
+    }
+    .screenshot-item img {
+        width: 100%;
+        height: 120px;
+        object-fit: cover;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-6">
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <a href="{{ url_for('calibration.index') }}" class="text-blue-500 hover:underline text-sm">
+                &larr; Zurück zur Übersicht
+            </a>
+            <h1 class="text-2xl font-bold mt-2">Kalibrierung: {{ video.filename or video.original_filename }}</h1>
+        </div>
+        <div class="flex gap-2">
+            <button onclick="resetAll()" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">
+                Zurücksetzen
+            </button>
+            <button onclick="saveCalibration()" id="save-btn"
+                    class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:bg-gray-400"
+                    disabled>
+                Speichern
+            </button>
+        </div>
+    </div>
+
+    <!-- Stepper -->
+    <div class="flex items-center justify-center mb-8">
+        <div class="flex items-center">
+            <div id="step1-indicator" class="w-10 h-10 rounded-full bg-blue-500 text-white flex items-center justify-center font-bold">1</div>
+            <span class="ml-2 mr-4 font-medium">Screenshots</span>
+        </div>
+        <div class="w-16 h-1 bg-gray-300" id="step1-line"></div>
+        <div class="flex items-center ml-4">
+            <div id="step2-indicator" class="w-10 h-10 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center font-bold">2</div>
+            <span class="ml-2 mr-4">Bande</span>
+        </div>
+        <div class="w-16 h-1 bg-gray-300" id="step2-line"></div>
+        <div class="flex items-center ml-4">
+            <div id="step3-indicator" class="w-10 h-10 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center font-bold">3</div>
+            <span class="ml-2 mr-4">Referenzpunkte</span>
+        </div>
+        <div class="w-16 h-1 bg-gray-300" id="step3-line"></div>
+        <div class="flex items-center ml-4">
+            <div id="step4-indicator" class="w-10 h-10 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center font-bold">4</div>
+            <span class="ml-2">Verifizieren</span>
+        </div>
+    </div>
+
+    <!-- Step 1: Screenshots -->
+    <div id="step1" class="step-content">
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-xl font-semibold mb-4">Schritt 1: Screenshots auswählen</h2>
+            <p class="text-gray-600 mb-4">
+                Klicke auf "Screenshots generieren" um 20 Bilder aus dem Video zu extrahieren.
+                Wähle dann die Screenshots aus, auf denen du Punkte markieren möchtest.
+                Du kannst auf verschiedenen Screenshots verschiedene Bereiche markieren (z.B. Bande, Torraum, Mittellinie).
+            </p>
+
+            <div id="screenshot-loading" class="hidden text-center py-8">
+                <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                <p class="mt-2 text-gray-600">Screenshots werden extrahiert...</p>
+            </div>
+
+            <div id="screenshot-empty" class="text-center py-8">
+                <button onclick="generateScreenshots()" class="bg-blue-500 text-white px-6 py-3 rounded-lg hover:bg-blue-600 text-lg">
+                    Screenshots generieren (20 Bilder)
+                </button>
+            </div>
+
+            <div id="screenshot-gallery" class="hidden">
+                <div class="flex items-center justify-between mb-4">
+                    <span class="text-sm text-gray-600">
+                        Klicke auf Screenshots um sie auszuwählen. Du kannst mehrere auswählen.
+                    </span>
+                    <span id="selected-count" class="text-sm font-medium text-green-600">0 ausgewählt</span>
+                </div>
+
+                <div class="screenshot-grid" id="screenshot-grid">
+                    <!-- Screenshots werden hier eingefügt -->
+                </div>
+
+                <div class="flex justify-between mt-6">
+                    <button onclick="generateScreenshots()" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">
+                        Neu generieren
+                    </button>
+                    <button onclick="goToStep(2)" id="step1-next"
+                            class="px-6 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400"
+                            disabled>
+                        Weiter zu Schritt 2 &rarr;
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Step 2: Bande zeichnen -->
+    <div id="step2" class="step-content hidden">
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-xl font-semibold mb-4">Schritt 2: Banden-Polygon zeichnen</h2>
+            <p class="text-gray-600 mb-4">
+                Klicke auf die Ecken der Bande, um das Spielfeld-Polygon zu definieren.
+                Nur Spieler innerhalb dieses Bereichs werden erkannt.
+                <strong>Rechtsklick</strong> = Letzten Punkt entfernen.
+            </p>
+
+            <!-- Screenshot-Auswahl für diesen Schritt -->
+            <div class="mb-4">
+                <label class="text-sm font-medium">Screenshot für Bande:</label>
+                <select id="boundary-screenshot-select" onchange="loadBoundaryScreenshot()" class="ml-2 border rounded px-3 py-1">
+                </select>
+            </div>
+
+            <div class="flex gap-4 mb-4">
+                <button onclick="boundaryCanvas.clearPolygon(); updateBoundaryCount()"
+                        class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm">
+                    Polygon löschen
+                </button>
+                <span id="boundary-count" class="text-sm text-gray-600">0 Punkte</span>
+            </div>
+
+            <div class="border rounded-lg overflow-hidden" style="height: 500px;">
+                <canvas id="boundary-canvas" width="1200" height="500"></canvas>
+            </div>
+
+            <div class="flex justify-between mt-4">
+                <button onclick="goToStep(1)" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">
+                    &larr; Zurück
+                </button>
+                <button onclick="goToStep(3)" id="step2-next"
+                        class="px-6 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400"
+                        disabled>
+                    Weiter zu Schritt 3 &rarr;
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Step 3: Referenzpunkte -->
+    <div id="step3" class="step-content hidden">
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-xl font-semibold mb-4">Schritt 3: Referenzpunkte setzen</h2>
+            <p class="text-gray-600 mb-4">
+                Markiere mindestens 4 identische Punkte im Screenshot (links) und auf dem Spielfeld (rechts).
+                Du kannst den Screenshot wechseln, um verschiedene Bereiche zu markieren.
+            </p>
+
+            <!-- Screenshot-Auswahl und Spielfeld-Rotation für diesen Schritt -->
+            <div class="mb-4 flex items-center gap-6">
+                <div>
+                    <label class="text-sm font-medium">Aktueller Screenshot:</label>
+                    <select id="points-screenshot-select" onchange="loadPointsScreenshot()" class="ml-2 border rounded px-3 py-1">
+                    </select>
+                </div>
+                <div>
+                    <label class="text-sm font-medium">Spielfeld-Ansicht:</label>
+                    <select id="field-rotation-select" onchange="rotateFieldCanvas()" class="ml-2 border rounded px-3 py-1">
+                        <option value="0">Standard (Längsansicht)</option>
+                        <option value="90">90° gedreht (Hintertorkamera links)</option>
+                        <option value="270">270° gedreht (Hintertorkamera rechts)</option>
+                    </select>
+                </div>
+                <span class="text-sm text-gray-500">
+                    Tipp: Für Hintertorkameras die passende Rotation wählen
+                </span>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <!-- Screenshot mit Punkten -->
+                <div>
+                    <div class="flex items-center justify-between mb-2">
+                        <h3 class="font-medium">Screenshot (Pixel-Koordinaten)</h3>
+                        <div class="flex items-center gap-2">
+                            <span id="image-point-count" class="text-sm text-gray-600">0 Punkte</span>
+                            <button onclick="removeLastImagePoint()" class="text-xs px-2 py-1 bg-red-100 text-red-600 rounded hover:bg-red-200">
+                                Letzten entfernen
+                            </button>
+                        </div>
+                    </div>
+                    <div class="border rounded-lg overflow-hidden" style="height: 400px;">
+                        <canvas id="image-canvas" width="600" height="400"></canvas>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-1">Tipp: Rechtsklick = letzten Punkt entfernen</p>
+                </div>
+
+                <!-- Spielfeld -->
+                <div>
+                    <div class="flex items-center justify-between mb-2">
+                        <h3 class="font-medium">Spielfeld (Meter-Koordinaten)</h3>
+                        <div class="flex items-center gap-2">
+                            <span id="field-point-count" class="text-sm text-gray-600">0 Punkte</span>
+                            <button onclick="removeLastFieldPoint()" class="text-xs px-2 py-1 bg-red-100 text-red-600 rounded hover:bg-red-200">
+                                Letzten entfernen
+                            </button>
+                        </div>
+                    </div>
+                    <div class="border rounded-lg overflow-hidden bg-gray-100" style="height: 400px;">
+                        <canvas id="field-canvas" width="600" height="400"></canvas>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-1">Tipp: Rechtsklick = letzten Punkt entfernen, klicke auf markierte Punkte oder frei im Feld</p>
+                </div>
+            </div>
+
+            <!-- Punkt-Liste -->
+            <div class="mt-4">
+                <h4 class="font-medium mb-2">Gesetzte Punkt-Paare: <span class="text-xs font-normal text-gray-500">(Klicken zum Entfernen)</span></h4>
+                <div id="point-pairs" class="flex flex-wrap gap-2">
+                    <span class="text-gray-500 text-sm">Noch keine Punkte gesetzt</span>
+                </div>
+            </div>
+
+            <!-- Hilfslinien für Entzerrung -->
+            <div class="mt-6 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                <h4 class="font-medium mb-2 text-purple-800">Hilfslinien für Fisheye-Entzerrung</h4>
+                <p class="text-sm text-purple-600 mb-3">
+                    Zeichne Kurven entlang von Strukturen, die in der Realität gerade sind (z.B. Banden).
+                    Aus diesen Linien kann die Fisheye-Verzerrung automatisch berechnet werden.
+                </p>
+
+                <!-- Linientyp-Auswahl -->
+                <div class="flex items-center gap-4 mb-3 p-3 bg-white rounded border">
+                    <span class="text-sm font-medium">Linientyp:</span>
+                    <label class="flex items-center gap-1 cursor-pointer">
+                        <input type="radio" name="line-type" value="horizontal" class="accent-purple-600">
+                        <span class="text-sm">Horizontal (Lange Bande)</span>
+                    </label>
+                    <label class="flex items-center gap-1 cursor-pointer">
+                        <input type="radio" name="line-type" value="vertical" class="accent-purple-600">
+                        <span class="text-sm">Vertikal (Kurze Bande)</span>
+                    </label>
+                    <label class="flex items-center gap-1 cursor-pointer">
+                        <input type="radio" name="line-type" value="free" checked class="accent-purple-600">
+                        <span class="text-sm">Frei (Andere)</span>
+                    </label>
+                </div>
+
+                <div class="flex items-center gap-4 mb-3">
+                    <button id="toggle-line-mode" onclick="toggleStraightLineMode()"
+                            class="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 transition-colors">
+                        Hilfslinien-Modus aktivieren
+                    </button>
+                    <button id="finish-line-btn" onclick="finishCurrentLine()"
+                            class="px-4 py-2 bg-purple-300 text-purple-800 rounded hover:bg-purple-400 hidden">
+                        Linie abschliessen (Enter)
+                    </button>
+                    <button onclick="removeLastLine()"
+                            class="px-4 py-2 bg-red-100 text-red-600 rounded hover:bg-red-200">
+                        Letzte Linie entfernen
+                    </button>
+                    <button onclick="clearAllLines()"
+                            class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">
+                        Alle Linien löschen
+                    </button>
+                </div>
+
+                <!-- Linien-Liste -->
+                <div id="lines-list" class="mb-3 text-sm">
+                    <span class="text-purple-500">Noch keine Linien gezeichnet</span>
+                </div>
+
+                <div class="flex items-center gap-2 text-sm text-purple-700 mb-3">
+                    <span id="line-count">0 Linien gezeichnet</span>
+                    <span class="text-purple-400">|</span>
+                    <span id="current-line-points">Aktuelle Linie: 0 Punkte</span>
+                </div>
+
+                <!-- Distortion berechnen -->
+                <div class="flex items-center gap-4 mt-4 pt-4 border-t border-purple-200">
+                    <button onclick="estimateDistortion()"
+                            class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:bg-gray-400"
+                            id="estimate-btn" disabled>
+                        Distortion aus Linien berechnen
+                    </button>
+                    <input type="text" id="profile-name" placeholder="Profilname (optional)"
+                           class="border rounded px-3 py-2 text-sm" style="width: 200px;">
+                    <span id="estimation-result" class="text-sm text-gray-600"></span>
+                </div>
+
+                <p class="text-xs text-purple-500 mt-3">
+                    <strong>Anleitung:</strong> 1) Linientyp wählen 2) Modus aktivieren 3) Mehrere Punkte entlang einer geraden Struktur klicken
+                    4) Enter drücken 5) Weitere Linien hinzufügen 6) "Distortion berechnen" klicken
+                </p>
+            </div>
+
+            <div class="flex justify-between mt-4">
+                <button onclick="goToStep(2)" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">
+                    &larr; Zurück
+                </button>
+                <button onclick="calculateAndVerify()" id="step3-next"
+                        class="px-6 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400"
+                        disabled>
+                    Berechnen & Verifizieren &rarr;
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Step 4: Verifizieren -->
+    <div id="step4" class="step-content hidden">
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-xl font-semibold mb-4">Schritt 4: Kalibrierung verifizieren</h2>
+            <p class="text-gray-600 mb-4">
+                Prüfe, ob das Grid mit den tatsächlichen Feldlinien übereinstimmt.
+                Die Tore sollten bei 2.85m von der Bande entfernt sein, der Torraum hat 4m Radius.
+            </p>
+
+            <!-- Lens Profile Auswahl für Fisheye-Korrektur -->
+            <div class="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <h4 class="font-medium mb-2 text-blue-800">Fisheye-Korrektur (Lens-Profil)</h4>
+                <p class="text-sm text-blue-600 mb-3">
+                    Wähle das passende Kamera-Profil für die Linsen-Korrektur.
+                </p>
+                <div class="flex items-center gap-4 mb-3">
+                    <select id="lens-profile-select" class="border rounded px-3 py-2 flex-1">
+                        <option value="">Kein Lens-Profil (gerade Linien)</option>
+                    </select>
+                </div>
+
+                <!-- Methoden-Auswahl -->
+                <div class="grid grid-cols-2 gap-4">
+                    <!-- Option A: Bestehende Punkte transformieren -->
+                    <div class="p-3 border border-green-300 bg-green-50 rounded-lg">
+                        <h5 class="font-medium text-green-800 mb-2">Option A: Punkte transformieren</h5>
+                        <p class="text-xs text-green-600 mb-2">
+                            Transformiert deine bestehenden Referenzpunkte mit der Lens-Korrektur und berechnet eine neue Homographie.
+                        </p>
+                        <button onclick="applyLensCorrection()" id="lens-correct-btn"
+                                class="w-full px-3 py-2 bg-green-500 text-white rounded hover:bg-green-600 text-sm">
+                            Lens-Korrektur anwenden
+                        </button>
+                        <p id="lens-correct-status" class="text-xs text-green-600 mt-1"></p>
+                    </div>
+
+                    <!-- Option B: Mit entzerrtem Bild arbeiten -->
+                    <div class="p-3 border border-purple-300 bg-purple-50 rounded-lg">
+                        <h5 class="font-medium text-purple-800 mb-2">Option B: Entzerrtes Bild</h5>
+                        <p class="text-xs text-purple-600 mb-2">
+                            Erstellt ein entzerrtes Bild. Du kannst dann zurück zu Schritt 3 und die Punkte auf dem entzerrten Bild neu setzen.
+                        </p>
+                        <div class="mb-2">
+                            <label class="text-xs text-purple-700 block mb-1">
+                                Zoom-Out: <span id="zoom-out-value">1.2</span>x
+                            </label>
+                            <input type="range" id="zoom-out-slider" min="1.0" max="1.5" step="0.05" value="1.2"
+                                   class="w-full h-2 bg-purple-200 rounded-lg cursor-pointer"
+                                   oninput="document.getElementById('zoom-out-value').textContent = this.value">
+                            <p class="text-xs text-purple-500 mt-1">Höher = mehr Ecken sichtbar (mit schwarzen Rändern)</p>
+                        </div>
+                        <button onclick="undistortScreenshot()" id="undistort-btn"
+                                class="w-full px-3 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 text-sm">
+                            Bild entzerren
+                        </button>
+                        <p id="undistort-status" class="text-xs text-purple-600 mt-1"></p>
+                    </div>
+                </div>
+
+                <div class="mt-3 flex gap-2">
+                    <button onclick="regenerateOverlay()" class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+                        Overlay neu generieren
+                    </button>
+                </div>
+            </div>
+
+            <div id="overlay-container" class="border rounded-lg overflow-hidden">
+                <img id="overlay-img" class="max-w-full" alt="Test-Overlay">
+            </div>
+
+            <div class="mt-4 p-4 bg-gray-50 rounded-lg">
+                <h4 class="font-medium mb-2">Legende:</h4>
+                <div class="flex flex-wrap gap-4 text-sm">
+                    <span><span class="inline-block w-4 h-4 bg-green-500 mr-1"></span> Grid (5m Abstand)</span>
+                    <span><span class="inline-block w-4 h-4 bg-yellow-400 mr-1"></span> Mittellinie</span>
+                    <span><span class="inline-block w-4 h-4 bg-red-500 mr-1"></span> Spielfeldrand</span>
+                    <span><span class="inline-block w-4 h-4" style="background: cyan" ></span> Mittelkreis (3m)</span>
+                    <span><span class="inline-block w-4 h-4" style="background: magenta"></span> Tore/Torraum</span>
+                    <span><span class="inline-block w-4 h-4 bg-blue-500 mr-1"></span> Banden-Polygon</span>
+                    <span><span class="inline-block w-4 h-4 bg-orange-500 mr-1"></span> Referenzpunkte</span>
+                </div>
+            </div>
+
+            <div class="flex justify-between mt-4">
+                <button onclick="goToStep(3)" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">
+                    &larr; Punkte anpassen
+                </button>
+                <div class="flex gap-2 items-center">
+                    <button onclick="optimizeCalibration()"
+                            id="optimize-btn"
+                            class="px-6 py-2 bg-purple-500 text-white rounded hover:bg-purple-600">
+                        Optimieren (Fisheye + Homographie)
+                    </button>
+                    <span id="optimize-result" class="text-sm text-gray-600"></span>
+                </div>
+                <div class="flex gap-2 mt-2">
+                    <input type="text" id="calibration-name" placeholder="Name der Kalibrierung"
+                           class="border rounded px-3 py-2 w-64">
+                    <button onclick="saveCalibration()"
+                            class="px-6 py-2 bg-green-500 text-white rounded hover:bg-green-600">
+                        Speichern
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/calibration.js') }}"></script>
+<script>
+const videoId = '{{ video.id }}';
+let screenshots = [];
+let selectedScreenshots = new Set();
+let currentBoundaryScreenshot = null;
+let currentPointsScreenshot = null;
+let currentStep = 1;
+
+let boundaryCanvas = null;
+let imageCanvas = null;
+let fieldCanvas = null;
+let lensProfiles = [];
+let isLoadingStep = false;  // Verhindert mehrfaches Laden
+
+// Initialisierung
+document.addEventListener('DOMContentLoaded', async () => {
+    // Lens-Profile laden
+    loadLensProfiles();
+    // Boundary Canvas (für Schritt 2)
+    boundaryCanvas = new CalibrationCanvas('boundary-canvas', {
+        mode: 'polygon',
+        polygonColor: '#00AAFF',
+        onPointAdded: (count) => updateBoundaryCount(),
+        onPointRemoved: (count) => updateBoundaryCount()
+    });
+
+    // Image Canvas (für Schritt 3 - Screenshot)
+    imageCanvas = new CalibrationCanvas('image-canvas', {
+        mode: 'points',
+        pointColor: '#FF6B00',
+        onPointAdded: (count, pos) => {
+            updatePointCounts();
+            checkPointPairs();
+        },
+        onPointRemoved: () => {
+            updatePointCounts();
+            checkPointPairs();
+        },
+        onStraightLinePointAdded: (count, pos) => {
+            updateLineCountDisplay();
+        }
+    });
+
+    // Field Canvas (für Schritt 3 - Spielfeld)
+    fieldCanvas = new FieldCanvas('field-canvas', {
+        fieldLength: 40,
+        fieldWidth: 20,
+        pointColor: '#FF6B00',
+        onPointAdded: (count, pos, name) => {
+            updatePointCounts();
+            checkPointPairs();
+        },
+        onPointRemoved: () => {
+            updatePointCounts();
+            checkPointPairs();
+        }
+    });
+
+    // Bestehende Kalibrierung laden
+    await loadExistingCalibration();
+});
+
+async function generateScreenshots() {
+    document.getElementById('screenshot-empty').classList.add('hidden');
+    document.getElementById('screenshot-gallery').classList.add('hidden');
+    document.getElementById('screenshot-loading').classList.remove('hidden');
+
+    try {
+        const response = await fetch(`/calibration/api/videos/${videoId}/screenshots`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ num_screenshots: 20 })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            screenshots = result.screenshots;
+            selectedScreenshots.clear();
+            renderScreenshotGallery();
+            document.getElementById('screenshot-loading').classList.add('hidden');
+            document.getElementById('screenshot-gallery').classList.remove('hidden');
+        } else {
+            alert('Fehler: ' + result.error);
+            document.getElementById('screenshot-loading').classList.add('hidden');
+            document.getElementById('screenshot-empty').classList.remove('hidden');
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+        document.getElementById('screenshot-loading').classList.add('hidden');
+        document.getElementById('screenshot-empty').classList.remove('hidden');
+    }
+}
+
+function renderScreenshotGallery() {
+    const grid = document.getElementById('screenshot-grid');
+    grid.innerHTML = '';
+
+    screenshots.forEach((screenshot, index) => {
+        const item = document.createElement('div');
+        item.className = 'screenshot-item rounded-lg overflow-hidden bg-white shadow';
+        item.dataset.index = index;
+
+        if (selectedScreenshots.has(index)) {
+            item.classList.add('selected');
+        }
+
+        item.innerHTML = `
+            <img src="/calibration/screenshot/${videoId}/screenshots/${screenshot.filename}?t=${Date.now()}"
+                 alt="Screenshot ${screenshot.index}">
+            <div class="p-2 text-center">
+                <span class="text-sm font-medium">#${screenshot.index}</span>
+                <span class="text-xs text-gray-500 ml-1">${screenshot.timestamp_formatted}</span>
+            </div>
+        `;
+
+        item.onclick = () => toggleScreenshot(index);
+        grid.appendChild(item);
+    });
+
+    updateSelectedCount();
+}
+
+function toggleScreenshot(index) {
+    if (selectedScreenshots.has(index)) {
+        selectedScreenshots.delete(index);
+    } else {
+        selectedScreenshots.add(index);
+    }
+
+    // UI aktualisieren
+    const items = document.querySelectorAll('.screenshot-item');
+    items.forEach((item, i) => {
+        if (selectedScreenshots.has(i)) {
+            item.classList.add('selected');
+        } else {
+            item.classList.remove('selected');
+        }
+    });
+
+    updateSelectedCount();
+}
+
+function updateSelectedCount() {
+    document.getElementById('selected-count').textContent = `${selectedScreenshots.size} ausgewählt`;
+    document.getElementById('step1-next').disabled = selectedScreenshots.size === 0;
+}
+
+function populateScreenshotSelects() {
+    const boundarySelect = document.getElementById('boundary-screenshot-select');
+    const pointsSelect = document.getElementById('points-screenshot-select');
+
+    boundarySelect.innerHTML = '';
+    pointsSelect.innerHTML = '';
+
+    const selectedIndices = Array.from(selectedScreenshots).sort((a, b) => a - b);
+
+    selectedIndices.forEach(index => {
+        const screenshot = screenshots[index];
+        const option1 = document.createElement('option');
+        option1.value = index;
+        option1.textContent = `#${screenshot.index} (${screenshot.timestamp_formatted})`;
+        boundarySelect.appendChild(option1);
+
+        const option2 = document.createElement('option');
+        option2.value = index;
+        option2.textContent = `#${screenshot.index} (${screenshot.timestamp_formatted})`;
+        pointsSelect.appendChild(option2);
+    });
+
+    // Ersten Screenshot als Standard setzen
+    if (selectedIndices.length > 0) {
+        currentBoundaryScreenshot = selectedIndices[0];
+        currentPointsScreenshot = selectedIndices[0];
+    }
+}
+
+function loadBoundaryScreenshot() {
+    const select = document.getElementById('boundary-screenshot-select');
+    const index = parseInt(select.value);
+    currentBoundaryScreenshot = index;
+
+    const screenshot = screenshots[index];
+    const path = `/calibration/screenshot/${videoId}/screenshots/${screenshot.filename}`;
+    boundaryCanvas.loadImage(path);
+}
+
+function loadPointsScreenshot() {
+    const select = document.getElementById('points-screenshot-select');
+    const index = parseInt(select.value);
+
+    // Nur laden wenn sich der Screenshot geändert hat
+    if (index === currentPointsScreenshot && imageCanvas.imageLoaded) {
+        return;
+    }
+
+    currentPointsScreenshot = index;
+
+    const screenshot = screenshots[index];
+    if (!screenshot) {
+        console.error('Screenshot not found at index:', index);
+        return;
+    }
+
+    const path = `/calibration/screenshot/${videoId}/screenshots/${screenshot.filename}?t=${Date.now()}`;
+    imageCanvas.loadImage(path).catch(err => {
+        console.error('Failed to load screenshot:', err);
+        alert('Screenshot konnte nicht geladen werden');
+    });
+}
+
+async function goToStep(step) {
+    // Aktuellen Schritt speichern bevor wir wechseln
+    if (currentStep !== step && !isLoadingStep) {
+        await saveCurrentStep();
+    }
+
+    // Alle Steps verstecken
+    document.querySelectorAll('.step-content').forEach(el => el.classList.add('hidden'));
+
+    // Gewünschten Step zeigen
+    document.getElementById(`step${step}`).classList.remove('hidden');
+
+    // Stepper-Indikatoren aktualisieren
+    for (let i = 1; i <= 4; i++) {
+        const indicator = document.getElementById(`step${i}-indicator`);
+        const line = document.getElementById(`step${i}-line`);
+
+        if (i < step) {
+            indicator.className = 'w-10 h-10 rounded-full bg-green-500 text-white flex items-center justify-center font-bold';
+            if (line) line.className = 'w-16 h-1 bg-green-500';
+        } else if (i === step) {
+            indicator.className = 'w-10 h-10 rounded-full bg-blue-500 text-white flex items-center justify-center font-bold';
+            if (line) line.className = 'w-16 h-1 bg-gray-300';
+        } else {
+            indicator.className = 'w-10 h-10 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center font-bold';
+            if (line) line.className = 'w-16 h-1 bg-gray-300';
+        }
+    }
+
+    const previousStep = currentStep;
+    currentStep = step;
+
+    // Daten für den neuen Schritt laden (wenn nicht bereits geladen)
+    if (!isLoadingStep) {
+        await loadStepData(step);
+    }
+
+    // Bei Schritt 2 und 3: Dropdowns befüllen und Screenshot laden
+    if (step === 2) {
+        populateScreenshotSelects();
+        // Dropdown auf aktuellen Wert setzen
+        const boundarySelect = document.getElementById('boundary-screenshot-select');
+        if (currentBoundaryScreenshot !== null && boundarySelect) {
+            boundarySelect.value = currentBoundaryScreenshot;
+        }
+        loadBoundaryScreenshot();
+    } else if (step === 3) {
+        populateScreenshotSelects();
+        // Dropdown auf aktuellen Wert setzen
+        const pointsSelect = document.getElementById('points-screenshot-select');
+        if (currentPointsScreenshot !== null && pointsSelect) {
+            pointsSelect.value = currentPointsScreenshot;
+        }
+        loadPointsScreenshot();
+    }
+}
+
+function updateBoundaryCount() {
+    const count = boundaryCanvas.getPolygon().length;
+    document.getElementById('boundary-count').textContent = `${count} Punkte`;
+    document.getElementById('step2-next').disabled = count < 3;
+}
+
+function updatePointCounts() {
+    const imageCount = imageCanvas.getPoints().length;
+    const fieldCount = fieldCanvas.getPoints().length;
+
+    document.getElementById('image-point-count').textContent = `${imageCount} Punkte`;
+    document.getElementById('field-point-count').textContent = `${fieldCount} Punkte`;
+}
+
+function removeLastImagePoint() {
+    imageCanvas.removeLastPoint();
+    updatePointCounts();
+    checkPointPairs();
+}
+
+function removeLastFieldPoint() {
+    fieldCanvas.removeLastPoint();
+    updatePointCounts();
+    checkPointPairs();
+}
+
+function rotateFieldCanvas() {
+    const select = document.getElementById('field-rotation-select');
+    const rotation = parseInt(select.value);
+    fieldCanvas.setRotation(rotation);
+}
+
+function checkPointPairs() {
+    const imagePoints = imageCanvas.getPoints();
+    const fieldPoints = fieldCanvas.getPoints();
+
+    const pairsContainer = document.getElementById('point-pairs');
+    const minPairs = Math.min(imagePoints.length, fieldPoints.length);
+
+    if (minPairs === 0) {
+        pairsContainer.innerHTML = '<span class="text-gray-500 text-sm">Noch keine Punkte gesetzt</span>';
+    } else {
+        pairsContainer.innerHTML = '';
+        for (let i = 0; i < minPairs; i++) {
+            const imgPt = imagePoints[i];
+            const fldPt = fieldPoints[i];
+            const badge = document.createElement('span');
+            badge.className = 'bg-orange-100 text-orange-800 px-2 py-1 rounded text-sm cursor-pointer hover:bg-red-200 hover:text-red-800 transition-colors group relative';
+            badge.innerHTML = `
+                <span class="group-hover:hidden">${i + 1}: (${Math.round(imgPt[0])}, ${Math.round(imgPt[1])}) → (${fldPt[0]}m, ${fldPt[1]}m)</span>
+                <span class="hidden group-hover:inline">✕ Punkt ${i + 1} entfernen</span>
+            `;
+            badge.title = 'Klicken zum Entfernen';
+            badge.onclick = () => removePointPairAtIndex(i);
+            pairsContainer.appendChild(badge);
+        }
+    }
+
+    // Überschüssige Punkte anzeigen (wenn mehr Bild- als Feld-Punkte oder umgekehrt)
+    if (imagePoints.length > minPairs) {
+        for (let i = minPairs; i < imagePoints.length; i++) {
+            const imgPt = imagePoints[i];
+            const badge = document.createElement('span');
+            badge.className = 'bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-sm cursor-pointer hover:bg-red-200 hover:text-red-800 transition-colors';
+            badge.innerHTML = `✕ Bild ${i + 1}: (${Math.round(imgPt[0])}, ${Math.round(imgPt[1])})`;
+            badge.title = 'Klicken zum Entfernen (kein Feld-Punkt zugeordnet)';
+            badge.onclick = () => {
+                imageCanvas.removePointAtIndex(i);
+                updatePointCounts();
+                checkPointPairs();
+            };
+            pairsContainer.appendChild(badge);
+        }
+    }
+
+    if (fieldPoints.length > minPairs) {
+        for (let i = minPairs; i < fieldPoints.length; i++) {
+            const fldPt = fieldPoints[i];
+            const badge = document.createElement('span');
+            badge.className = 'bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-sm cursor-pointer hover:bg-red-200 hover:text-red-800 transition-colors';
+            badge.innerHTML = `✕ Feld ${i + 1}: (${fldPt[0]}m, ${fldPt[1]}m)`;
+            badge.title = 'Klicken zum Entfernen (kein Bild-Punkt zugeordnet)';
+            badge.onclick = () => {
+                fieldCanvas.removePointAtIndex(i);
+                updatePointCounts();
+                checkPointPairs();
+            };
+            pairsContainer.appendChild(badge);
+        }
+    }
+
+    // Button aktivieren wenn mindestens 4 Paare
+    document.getElementById('step3-next').disabled = minPairs < 4;
+
+    // Warnung wenn ungleiche Anzahl
+    if (imagePoints.length !== fieldPoints.length && minPairs > 0) {
+        const warning = document.createElement('span');
+        warning.className = 'text-yellow-600 text-sm ml-2';
+        warning.textContent = `⚠ Ungleiche Anzahl: ${imagePoints.length} vs ${fieldPoints.length}`;
+        pairsContainer.appendChild(warning);
+    }
+}
+
+function removePointPairAtIndex(index) {
+    // Entferne Punkt an Index von beiden Canvases
+    imageCanvas.removePointAtIndex(index);
+    fieldCanvas.removePointAtIndex(index);
+    updatePointCounts();
+    checkPointPairs();
+}
+
+// === Hilfslinien-Funktionen für Entzerrung ===
+let straightLineMode = false;
+let straightLinesData = [];  // Array von {points: [...], type: "horizontal"|"vertical"|"free"}
+
+function getSelectedLineType() {
+    const selected = document.querySelector('input[name="line-type"]:checked');
+    return selected ? selected.value : 'free';
+}
+
+function toggleStraightLineMode() {
+    straightLineMode = !straightLineMode;
+    const btn = document.getElementById('toggle-line-mode');
+    const finishBtn = document.getElementById('finish-line-btn');
+
+    if (straightLineMode) {
+        imageCanvas.setStraightLineMode(true);
+        btn.textContent = 'Hilfslinien-Modus deaktivieren';
+        btn.classList.remove('bg-purple-500', 'hover:bg-purple-600');
+        btn.classList.add('bg-red-500', 'hover:bg-red-600');
+        finishBtn.classList.remove('hidden');
+    } else {
+        // Vor dem Deaktivieren: aktuelle Linie abschliessen
+        finishCurrentLine();
+        imageCanvas.setStraightLineMode(false);
+        btn.textContent = 'Hilfslinien-Modus aktivieren';
+        btn.classList.remove('bg-red-500', 'hover:bg-red-600');
+        btn.classList.add('bg-purple-500', 'hover:bg-purple-600');
+        finishBtn.classList.add('hidden');
+    }
+}
+
+function finishCurrentLine() {
+    if (imageCanvas.currentStraightLine.length >= 3) {
+        // Speichere Linie mit Typ
+        const lineType = getSelectedLineType();
+        const points = imageCanvas.currentStraightLine.map(p => [p.x, p.y]);
+        straightLinesData.push({
+            points: points,
+            type: lineType
+        });
+    }
+    imageCanvas.finishStraightLine();
+    updateLineCountDisplay();
+    updateLinesListDisplay();
+    updateEstimateButton();
+}
+
+function removeLastLine() {
+    imageCanvas.removeLastStraightLine();
+    if (straightLinesData.length > 0) {
+        straightLinesData.pop();
+    }
+    updateLineCountDisplay();
+    updateLinesListDisplay();
+    updateEstimateButton();
+}
+
+function clearAllLines() {
+    if (confirm('Alle Hilfslinien löschen?')) {
+        imageCanvas.clearStraightLines();
+        straightLinesData = [];
+        updateLineCountDisplay();
+        updateLinesListDisplay();
+        updateEstimateButton();
+    }
+}
+
+function updateLineCountDisplay() {
+    const lineCount = imageCanvas.straightLines.length;
+    const currentPoints = imageCanvas.currentStraightLine.length;
+    document.getElementById('line-count').textContent = `${lineCount} Linien gezeichnet`;
+    document.getElementById('current-line-points').textContent = `Aktuelle Linie: ${currentPoints} Punkte`;
+}
+
+function updateLinesListDisplay() {
+    const container = document.getElementById('lines-list');
+    if (straightLinesData.length === 0) {
+        container.innerHTML = '<span class="text-purple-500">Noch keine Linien gezeichnet</span>';
+        return;
+    }
+
+    const typeLabels = {
+        'horizontal': 'Horizontal',
+        'vertical': 'Vertikal',
+        'free': 'Frei'
+    };
+    const typeColors = {
+        'horizontal': 'bg-blue-100 text-blue-800',
+        'vertical': 'bg-green-100 text-green-800',
+        'free': 'bg-gray-100 text-gray-800'
+    };
+
+    let html = '';
+    straightLinesData.forEach((line, i) => {
+        const label = typeLabels[line.type] || 'Frei';
+        const color = typeColors[line.type] || 'bg-gray-100 text-gray-800';
+        html += `<span class="inline-block ${color} px-2 py-1 rounded text-xs mr-2 mb-1">
+            Linie ${i+1}: ${label} (${line.points.length} Punkte)
+        </span>`;
+    });
+    container.innerHTML = html;
+}
+
+function updateEstimateButton() {
+    const btn = document.getElementById('estimate-btn');
+    btn.disabled = straightLinesData.length < 1;
+}
+
+async function estimateDistortion() {
+    if (straightLinesData.length < 1) {
+        alert('Mindestens eine Linie mit >= 3 Punkten erforderlich');
+        return;
+    }
+
+    const profileName = document.getElementById('profile-name').value.trim();
+    const resultSpan = document.getElementById('estimation-result');
+
+    // Bildgrösse aus dem geladenen Bild
+    const imageWidth = imageCanvas.image ? imageCanvas.image.width : 3840;
+    const imageHeight = imageCanvas.image ? imageCanvas.image.height : 2160;
+
+    resultSpan.textContent = 'Berechne...';
+    resultSpan.className = 'text-sm text-gray-600';
+
+    try {
+        const response = await fetch('/calibration/api/estimate-distortion', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                lines: straightLinesData,
+                image_width: imageWidth,
+                image_height: imageHeight,
+                save_as: profileName || null
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.error) {
+            resultSpan.textContent = `Fehler: ${data.error}`;
+            resultSpan.className = 'text-sm text-red-600';
+            return;
+        }
+
+        const k1 = data.estimated_k1.toFixed(4);
+        const error = data.straightness_error.toFixed(2);
+
+        if (profileName) {
+            resultSpan.innerHTML = `<span class="text-green-600">Profil "${profileName}" gespeichert!</span> k1=${k1}, Fehler=${error}px`;
+            // Lens-Profile-Liste aktualisieren
+            await loadLensProfiles();
+        } else {
+            resultSpan.textContent = `Geschätzt: k1=${k1}, Fehler=${error}px (nicht gespeichert)`;
+        }
+        resultSpan.className = 'text-sm text-green-700';
+
+    } catch (e) {
+        resultSpan.textContent = `Fehler: ${e.message}`;
+        resultSpan.className = 'text-sm text-red-600';
+    }
+}
+
+// Keyboard Event für Enter zum Abschliessen der Linie
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && straightLineMode) {
+        e.preventDefault();
+        finishCurrentLine();
+    }
+});
+
+async function calculateAndVerify() {
+    const imagePoints = imageCanvas.getPoints();
+    const fieldPoints = fieldCanvas.getPoints();
+    const boundaryPolygon = boundaryCanvas.getPolygon();
+
+    const minPairs = Math.min(imagePoints.length, fieldPoints.length);
+    if (minPairs < 4) {
+        alert('Mindestens 4 Punkt-Paare erforderlich');
+        return;
+    }
+
+    // Nur gleiche Anzahl verwenden
+    const usedImagePoints = imagePoints.slice(0, minPairs);
+    const usedFieldPoints = fieldPoints.slice(0, minPairs);
+
+    try {
+        // Erst speichern um Homography zu berechnen
+        const response = await fetch(`/calibration/api/videos/${videoId}/calibration`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: 'Vorschau',
+                boundary_polygon: boundaryPolygon,
+                image_points: usedImagePoints,
+                field_points: usedFieldPoints
+            })
+        });
+
+        const result = await response.json();
+
+        if (!result.success) {
+            alert('Fehler bei Homography-Berechnung: ' + result.error);
+            return;
+        }
+
+        // Für das Overlay: verwende den aktuellen Points-Screenshot
+        const screenshot = screenshots[currentPointsScreenshot];
+        const screenshotPath = `data/calibration/${videoId}/screenshots/${screenshot.filename}`;
+
+        // Lens-Profil für Fisheye-Korrektur
+        const lensProfileId = document.getElementById('lens-profile-select').value || null;
+
+        // Test-Overlay generieren
+        const overlayResponse = await fetch(`/calibration/api/videos/${videoId}/calibration/test`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                screenshot_path: screenshotPath,
+                lens_profile_id: lensProfileId
+            })
+        });
+
+        const overlayResult = await overlayResponse.json();
+
+        if (overlayResult.success) {
+            document.getElementById('overlay-img').src =
+                `/calibration/screenshot/${videoId}/test_overlay.jpg?t=` + Date.now();
+            goToStep(4);
+            document.getElementById('save-btn').disabled = false;
+        } else {
+            alert('Fehler beim Generieren des Overlays: ' + overlayResult.error);
+        }
+
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+
+async function optimizeCalibration() {
+    const resultSpan = document.getElementById('optimize-result');
+    const btn = document.getElementById('optimize-btn');
+
+    btn.disabled = true;
+    btn.textContent = 'Optimiere...';
+    resultSpan.textContent = '';
+
+    try {
+        // Zuerst speichern wir die aktuellen Punkte
+        await saveCurrentStep();
+
+        // Bildgrösse ermitteln (aus dem geladenen Screenshot)
+        const imgElement = document.querySelector('#image-canvas');
+        const imageWidth = imgElement ? imgElement.width : 1920;
+        const imageHeight = imgElement ? imgElement.height : 1080;
+
+        // Kombinierte Optimierung aufrufen
+        const response = await fetch(`/calibration/api/videos/${videoId}/calibration/optimize`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                image_width: imageWidth,
+                image_height: imageHeight,
+                optimize_distortion: true
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            resultSpan.textContent = result.message;
+            resultSpan.className = 'text-sm text-green-600 font-bold';
+
+            // Overlay neu generieren mit optimierten Parametern
+            await regenerateOverlay();
+
+            alert(`Optimierung erfolgreich!\n\nk1 = ${result.k1.toFixed(4)}\nFehler = ${result.reprojection_error.toFixed(3)}m\n\nDas Overlay wurde aktualisiert.`);
+        } else {
+            resultSpan.textContent = 'Fehler: ' + result.error;
+            resultSpan.className = 'text-sm text-red-600';
+        }
+    } catch (err) {
+        resultSpan.textContent = 'Fehler: ' + err.message;
+        resultSpan.className = 'text-sm text-red-600';
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Optimieren (Fisheye + Homographie)';
+    }
+}
+
+async function saveCalibration() {
+    const name = document.getElementById('calibration-name').value.trim() ||
+                 'Kalibrierung {{ video.filename }}';
+
+    const imagePoints = imageCanvas.getPoints();
+    const fieldPoints = fieldCanvas.getPoints();
+    const boundaryPolygon = boundaryCanvas.getPolygon();
+
+    const minPairs = Math.min(imagePoints.length, fieldPoints.length);
+
+    try {
+        const response = await fetch(`/calibration/api/videos/${videoId}/calibration`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: name,
+                boundary_polygon: boundaryPolygon,
+                image_points: imagePoints.slice(0, minPairs),
+                field_points: fieldPoints.slice(0, minPairs)
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert('Kalibrierung gespeichert!');
+            window.location.href = '{{ url_for("calibration.index") }}';
+        } else {
+            alert('Fehler: ' + result.error);
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+
+function resetAll() {
+    if (!confirm('Alle Eingaben zurücksetzen?')) return;
+
+    boundaryCanvas.clearAll();
+    imageCanvas.clearAll();
+    fieldCanvas.clearPoints();
+    selectedScreenshots.clear();
+
+    updateBoundaryCount();
+    updatePointCounts();
+    checkPointPairs();
+    updateSelectedCount();
+
+    goToStep(1);
+    document.getElementById('screenshot-gallery').classList.add('hidden');
+    document.getElementById('screenshot-empty').classList.remove('hidden');
+    document.getElementById('save-btn').disabled = true;
+}
+
+// === Lens Profile Funktionen ===
+
+async function loadLensProfiles() {
+    try {
+        const response = await fetch('/calibration/api/lens-profiles');
+        lensProfiles = await response.json();
+
+        const select = document.getElementById('lens-profile-select');
+        select.innerHTML = '<option value="">Kein Lens-Profil (gerade Linien)</option>';
+
+        for (const profile of lensProfiles) {
+            const option = document.createElement('option');
+            option.value = profile.id;
+            option.textContent = profile.name;
+            if (profile.description) {
+                option.title = profile.description;
+            }
+            select.appendChild(option);
+        }
+    } catch (err) {
+        console.error('Fehler beim Laden der Lens-Profile:', err);
+    }
+}
+
+async function regenerateOverlay() {
+    const screenshot = screenshots[currentPointsScreenshot];
+    if (!screenshot) {
+        alert('Kein Screenshot ausgewählt');
+        return;
+    }
+
+    // Prüfe ob wir ein entzerrtes Bild verwenden sollen
+    let screenshotPath;
+    let useUndistorted = false;
+
+    if (screenshot.isUndistorted && window.undistortedImagePath) {
+        // Verwende das entzerrte Bild
+        screenshotPath = `data/calibration/${videoId}/undistorted_frame.jpg`;
+        useUndistorted = true;
+    } else {
+        screenshotPath = `data/calibration/${videoId}/screenshots/${screenshot.filename}`;
+    }
+
+    // Kein Lens-Profil wenn wir schon ein entzerrtes Bild verwenden
+    const lensProfileId = useUndistorted ? null : (document.getElementById('lens-profile-select').value || null);
+
+    try {
+        const response = await fetch(`/calibration/api/videos/${videoId}/calibration/test`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                screenshot_path: screenshotPath,
+                lens_profile_id: lensProfileId
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            document.getElementById('overlay-img').src =
+                `/calibration/screenshot/${videoId}/test_overlay.jpg?t=` + Date.now();
+        } else {
+            alert('Fehler beim Generieren des Overlays: ' + result.error);
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+
+
+// === Option A: Lens-Korrektur auf bestehende Punkte anwenden ===
+async function applyLensCorrection() {
+    const lensProfileId = document.getElementById('lens-profile-select').value;
+    if (!lensProfileId) {
+        alert('Bitte wähle zuerst ein Lens-Profil aus.');
+        return;
+    }
+
+    const statusEl = document.getElementById('lens-correct-status');
+    const btn = document.getElementById('lens-correct-btn');
+
+    btn.disabled = true;
+    statusEl.textContent = 'Korrigiere Punkte...';
+
+    try {
+        const response = await fetch(`/calibration/api/videos/${videoId}/calibration/apply-lens-correction`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lens_profile_id: lensProfileId })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            statusEl.textContent = `✓ Korrektur angewendet! Overlay wird aktualisiert...`;
+            statusEl.classList.remove('text-red-600');
+            statusEl.classList.add('text-green-600');
+
+            // Overlay neu generieren
+            await regenerateOverlay();
+            statusEl.textContent = `✓ Fertig! Prüfe das Overlay.`;
+        } else {
+            statusEl.textContent = `✗ Fehler: ${result.error}`;
+            statusEl.classList.remove('text-green-600');
+            statusEl.classList.add('text-red-600');
+        }
+    } catch (err) {
+        statusEl.textContent = `✗ Fehler: ${err.message}`;
+        statusEl.classList.add('text-red-600');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+
+// === Option B: Screenshot entzerren ===
+async function undistortScreenshot() {
+    const lensProfileId = document.getElementById('lens-profile-select').value;
+    if (!lensProfileId) {
+        alert('Bitte wähle zuerst ein Lens-Profil aus.');
+        return;
+    }
+
+    const screenshot = screenshots[currentPointsScreenshot];
+    if (!screenshot) {
+        alert('Kein Screenshot ausgewählt');
+        return;
+    }
+
+    const statusEl = document.getElementById('undistort-status');
+    const btn = document.getElementById('undistort-btn');
+
+    btn.disabled = true;
+    statusEl.textContent = 'Entzerrung läuft...';
+
+    try {
+        const screenshotPath = `data/calibration/${videoId}/screenshots/${screenshot.filename}`;
+        const zoomOut = parseFloat(document.getElementById('zoom-out-slider').value) || 1.2;
+
+        const response = await fetch(`/calibration/api/videos/${videoId}/undistort-screenshot`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                lens_profile_id: lensProfileId,
+                screenshot_path: screenshotPath,
+                balance: 1.0,
+                zoom_out: zoomOut
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            statusEl.innerHTML = `✓ Bild entzerrt! <a href="#" onclick="useUndistortedImage(); return false;" class="underline font-bold">Klicke hier</a> um es für die Kalibrierung zu verwenden.`;
+            statusEl.classList.remove('text-red-600');
+            statusEl.classList.add('text-purple-600');
+
+            // Speichere den Pfad für später
+            window.undistortedImagePath = result.undistorted_path;
+
+            // Zeige das entzerrte Bild direkt im Overlay-Container an
+            const overlayImg = document.getElementById('overlay-img');
+            if (overlayImg) {
+                // Erst src leeren um Browser-Cache zu umgehen
+                overlayImg.src = '';
+                // Dann mit neuem Cache-Buster setzen
+                setTimeout(() => {
+                    const cacheBuster = Date.now() + Math.random();
+                    overlayImg.src = `/calibration/screenshot/${videoId}/undistorted_frame.jpg?t=${cacheBuster}`;
+                }, 50);
+            }
+        } else {
+            statusEl.textContent = `✗ Fehler: ${result.error}`;
+            statusEl.classList.add('text-red-600');
+        }
+    } catch (err) {
+        statusEl.textContent = `✗ Fehler: ${err.message}`;
+        statusEl.classList.add('text-red-600');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+
+// Entzerrtes Bild für Kalibrierung verwenden
+function useUndistortedImage() {
+    if (!window.undistortedImagePath) {
+        alert('Kein entzerrtes Bild verfügbar');
+        return;
+    }
+
+    // Füge entzerrtes Bild zur Screenshot-Liste hinzu
+    const undistortedScreenshot = {
+        filename: 'undistorted_frame.jpg',
+        path: window.undistortedImagePath,
+        timestamp: 0,
+        isUndistorted: true
+    };
+
+    // Prüfe ob schon vorhanden
+    const existingIdx = screenshots.findIndex(s => s.filename === 'undistorted_frame.jpg');
+    if (existingIdx >= 0) {
+        screenshots[existingIdx] = undistortedScreenshot;
+    } else {
+        screenshots.push(undistortedScreenshot);
+    }
+
+    // Wähle das entzerrte Bild aus
+    const idx = screenshots.findIndex(s => s.filename === 'undistorted_frame.jpg');
+    currentPointsScreenshot = idx;
+    selectedScreenshots.clear();
+    selectedScreenshots.add(idx);
+
+    renderScreenshotGallery();
+
+    alert('Entzerrtes Bild hinzugefügt! Gehe zu Schritt 3 um die Punkte auf dem entzerrten Bild neu zu setzen.');
+
+    // Zu Schritt 3 wechseln
+    goToStep(3);
+}
+
+
+// === Schrittweises Speichern/Laden ===
+
+async function loadExistingCalibration() {
+    try {
+        // Zuerst: Prüfe ob Screenshots existieren (unabhängig von Kalibrierung)
+        const screenshotsLoaded = await loadScreenshotsFromServer();
+
+        const response = await fetch(`/calibration/api/videos/${videoId}/calibration`);
+        const data = await response.json();
+
+        // Wenn Screenshots existieren, zeige sie an
+        if (screenshots.length > 0) {
+            renderScreenshotGallery();
+            document.getElementById('screenshot-gallery').classList.remove('hidden');
+            document.getElementById('screenshot-empty').classList.add('hidden');
+            // Ersten Screenshot standardmässig auswählen
+            if (selectedScreenshots.size === 0) {
+                selectedScreenshots.add(0);
+            }
+            document.getElementById('step1-next').disabled = false;
+        }
+
+        if (!data.calibration) {
+            console.log('Keine bestehende Kalibrierung gefunden');
+            return;
+        }
+
+        const cal = data.calibration;
+        const calData = cal.calibration_data || {};
+
+        isLoadingStep = true;
+
+        // Gespeicherten Screenshot-Index laden
+        if (calData.step1_screenshots && screenshots.length > 0) {
+            const savedIndex = calData.step1_screenshots.screenshot_index || 0;
+            selectedScreenshots.clear();
+            selectedScreenshots.add(savedIndex);
+            renderScreenshotGallery();
+            updateSelectedCount();
+        }
+
+        // Boundary Polygon laden (Step 2)
+        if (calData.step2_boundary && calData.step2_boundary.boundary_polygon) {
+            const polygon = calData.step2_boundary.boundary_polygon;
+            if (polygon.length > 0 && boundaryCanvas) {
+                boundaryCanvas.setPolygon(polygon);
+                updateBoundaryCount();
+            }
+        }
+
+        // Punkte laden (Step 3)
+        if (calData.step3_points) {
+            const step3 = calData.step3_points;
+
+            // Image Points
+            if (step3.image_points && step3.image_points.length > 0 && imageCanvas) {
+                imageCanvas.setPoints(step3.image_points);
+            }
+
+            // Field Points
+            if (step3.field_points && step3.field_points.length > 0 && fieldCanvas) {
+                fieldCanvas.setPoints(step3.field_points);
+            }
+
+            // Straight Lines
+            if (step3.straight_lines && step3.straight_lines.length > 0) {
+                straightLinesData = step3.straight_lines;
+                // Linien im Canvas setzen
+                if (imageCanvas) {
+                    const linesForCanvas = straightLinesData.map(l => l.points.map(p => ({x: p[0], y: p[1]})));
+                    imageCanvas.setStraightLines(linesForCanvas);
+                }
+                updateLineCountDisplay();
+                updateLinesListDisplay();
+                updateEstimateButton();
+            }
+
+            updatePointCounts();
+            checkPointPairs();
+        }
+
+        // Lens Profil laden (Step 4)
+        if (calData.step4_verify && calData.step4_verify.lens_profile_id) {
+            const profileSelect = document.getElementById('lens-profile-select');
+            if (profileSelect) {
+                profileSelect.value = calData.step4_verify.lens_profile_id;
+            }
+        }
+
+        // Zum gespeicherten Schritt springen
+        const savedStep = cal.current_step || 1;
+        if (savedStep > 1 && screenshots.length > 0) {
+            goToStep(savedStep);
+        }
+
+        isLoadingStep = false;
+
+        console.log('Kalibrierung geladen:', cal.name);
+
+    } catch (err) {
+        console.error('Fehler beim Laden der Kalibrierung:', err);
+        isLoadingStep = false;
+    }
+}
+
+async function loadScreenshotsFromServer() {
+    try {
+        // Versuche vorhandene Screenshots zu finden
+        const response = await fetch(`/calibration/api/videos/${videoId}/screenshots`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ num_screenshots: 0 })  // 0 = nur existierende laden
+        });
+
+        const result = await response.json();
+
+        if (result.success && result.screenshots && result.screenshots.length > 0) {
+            screenshots = result.screenshots;
+            return true;
+        }
+        return false;
+    } catch (err) {
+        console.error('Fehler beim Laden der Screenshots:', err);
+        return false;
+    }
+}
+
+async function saveCurrentStep() {
+    let stepData = {};
+
+    switch(currentStep) {
+        case 1:
+            // Screenshot-Auswahl speichern
+            const selectedIndices = Array.from(selectedScreenshots);
+            if (selectedIndices.length > 0) {
+                stepData = { screenshot_index: selectedIndices[0] };
+            }
+            break;
+
+        case 2:
+            // Boundary Polygon speichern
+            const boundary = boundaryCanvas.getPolygon();
+            if (boundary.length > 0) {
+                stepData = { boundary_polygon: boundary };
+            }
+            break;
+
+        case 3:
+            // Punkte und Linien speichern
+            const imagePoints = imageCanvas.getPoints();
+            const fieldPoints = fieldCanvas.getPoints();
+
+            stepData = {
+                image_points: imagePoints,
+                field_points: fieldPoints,
+                straight_lines: straightLinesData
+            };
+            break;
+
+        case 4:
+            // Verifizierung speichern
+            const lensProfileId = document.getElementById('lens-profile-select').value || null;
+            stepData = {
+                lens_profile_id: lensProfileId,
+                verified: true
+            };
+            break;
+    }
+
+    // Nur speichern wenn es Daten gibt
+    if (Object.keys(stepData).length === 0) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/calibration/api/videos/${videoId}/calibration/step/${currentStep}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(stepData)
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            console.log(`Schritt ${currentStep} gespeichert`);
+        } else {
+            console.error('Speichern fehlgeschlagen:', result.error);
+        }
+    } catch (err) {
+        console.error('Fehler beim Speichern:', err);
+    }
+}
+
+async function loadStepData(step) {
+    try {
+        const response = await fetch(`/calibration/api/videos/${videoId}/calibration/step/${step}`);
+        const data = await response.json();
+
+        if (!data.step_data) {
+            return;  // Keine Daten für diesen Schritt
+        }
+
+        const stepData = data.step_data;
+
+        switch(step) {
+            case 1:
+                // Screenshot-Auswahl laden
+                if (stepData.screenshot_index !== undefined) {
+                    selectedScreenshots.clear();
+                    selectedScreenshots.add(stepData.screenshot_index);
+                    if (screenshots.length > 0) {
+                        renderScreenshotGallery();
+                    }
+                }
+                break;
+
+            case 2:
+                // Boundary Polygon laden
+                if (stepData.boundary_polygon && stepData.boundary_polygon.length > 0) {
+                    boundaryCanvas.setPolygon(stepData.boundary_polygon);
+                    updateBoundaryCount();
+                }
+                break;
+
+            case 3:
+                // Punkte und Linien laden
+                if (stepData.image_points) {
+                    imageCanvas.setPoints(stepData.image_points);
+                }
+                if (stepData.field_points) {
+                    fieldCanvas.setPoints(stepData.field_points);
+                }
+                if (stepData.straight_lines) {
+                    straightLinesData = stepData.straight_lines;
+                    const linesForCanvas = straightLinesData.map(l => l.points.map(p => ({x: p[0], y: p[1]})));
+                    imageCanvas.setStraightLines(linesForCanvas);
+                    updateLineCountDisplay();
+                    updateLinesListDisplay();
+                    updateEstimateButton();
+                }
+                updatePointCounts();
+                checkPointPairs();
+                break;
+
+            case 4:
+                // Lens Profil laden
+                if (stepData.lens_profile_id) {
+                    const profileSelect = document.getElementById('lens-profile-select');
+                    if (profileSelect) {
+                        profileSelect.value = stepData.lens_profile_id;
+                    }
+                }
+                break;
+        }
+
+    } catch (err) {
+        console.error('Fehler beim Laden der Schrittdaten:', err);
+    }
+}
+</script>
+{% endblock %}

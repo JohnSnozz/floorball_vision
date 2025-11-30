@@ -6,102 +6,566 @@
 <div class="container mx-auto px-4 py-8">
     <h1 class="text-3xl font-bold mb-8">YOLO Training</h1>
 
-    <!-- Aktives Modell -->
-    <div class="bg-white rounded-lg shadow p-6 mb-8">
-        <h2 class="text-xl font-semibold mb-4">Aktives Modell</h2>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <!-- Linke Spalte: Neues Training -->
+        <div class="lg:col-span-2 space-y-6">
 
-        {% if active_model %}
-        <div class="flex items-center justify-between">
-            <div>
-                <p class="text-lg font-medium text-green-600">{{ active_model.model_name }}</p>
-                <p class="text-sm text-gray-500">mAP@50: {{ "%.2f"|format(active_model.map50 * 100) if active_model.map50 else "N/A" }}%</p>
-                <p class="text-xs text-gray-400">{{ active_model.model_path }}</p>
-            </div>
-            <span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm">Aktiv</span>
-        </div>
-        {% else %}
-        <p class="text-gray-500">Kein Modell aktiv. Trainiere zuerst ein Modell und aktiviere es.</p>
-        {% endif %}
-    </div>
+            <!-- Neues Training starten -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold mb-4">Neues Training starten</h2>
 
-    <!-- Training Runs -->
-    <div class="bg-white rounded-lg shadow p-6">
-        <h2 class="text-xl font-semibold mb-4">Training Runs</h2>
+                <form id="training-form" class="space-y-6">
+                    <!-- Dataset Auswahl -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            Dataset auswählen
+                        </label>
+                        {% if available_exports %}
+                        <select id="export-select" name="export_path" required
+                                class="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
+                            <option value="">-- Dataset wählen --</option>
+                            {% for export in available_exports %}
+                            <option value="{{ export.path }}">
+                                {{ export.name }} ({{ export.images }} Bilder, {{ export.labels }} Labels)
+                            </option>
+                            {% endfor %}
+                        </select>
+                        {% else %}
+                        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                            <p class="text-yellow-800">
+                                Keine exportierten Datasets gefunden.
+                                <a href="{{ url_for('labeling.index') }}" class="text-blue-600 hover:underline">
+                                    Erstelle zuerst Labels in Label Studio
+                                </a> und exportiere sie.
+                            </p>
+                        </div>
+                        {% endif %}
+                    </div>
 
-        {% if runs %}
-        <div class="overflow-x-auto">
-            <table class="min-w-full">
-                <thead>
-                    <tr class="border-b">
-                        <th class="text-left py-2">Modell</th>
-                        <th class="text-left py-2">Basis</th>
-                        <th class="text-left py-2">Status</th>
-                        <th class="text-left py-2">mAP@50</th>
-                        <th class="text-left py-2">Dauer</th>
-                        <th class="text-left py-2">Erstellt</th>
-                        <th class="text-left py-2">Aktionen</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for run in runs %}
-                    <tr class="border-b hover:bg-gray-50">
-                        <td class="py-3">{{ run.model_name }}</td>
-                        <td class="py-3 text-sm text-gray-500">{{ run.base_model }}</td>
-                        <td class="py-3">
-                            {% if run.status == 'completed' %}
-                            <span class="bg-green-100 text-green-800 px-2 py-1 rounded text-sm">Fertig</span>
-                            {% elif run.status == 'running' %}
-                            <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm animate-pulse">Läuft</span>
-                            {% elif run.status == 'failed' %}
-                            <span class="bg-red-100 text-red-800 px-2 py-1 rounded text-sm">Fehler</span>
-                            {% else %}
-                            <span class="bg-gray-100 text-gray-800 px-2 py-1 rounded text-sm">{{ run.status }}</span>
-                            {% endif %}
-                        </td>
-                        <td class="py-3">
-                            {{ "%.1f%%"|format(run.final_map50 * 100) if run.final_map50 else "-" }}
-                        </td>
-                        <td class="py-3 text-sm">
-                            {% if run.training_time %}
-                            {{ "%.0f min"|format(run.training_time / 60) }}
-                            {% else %}
-                            -
-                            {% endif %}
-                        </td>
-                        <td class="py-3 text-sm text-gray-500">
-                            {{ run.created_at.strftime('%d.%m.%Y %H:%M') if run.created_at else '-' }}
-                        </td>
-                        <td class="py-3">
-                            {% if run.status == 'completed' %}
-                            <button onclick="activateModel('{{ run.id }}')"
-                                    class="bg-green-500 text-white px-3 py-1 rounded text-sm hover:bg-green-600">
-                                Aktivieren
+                    <!-- Modell Auswahl -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            Basis-Modell
+                        </label>
+                        <select id="model-select" name="base_model" required
+                                class="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                                onchange="updateModelInfo()">
+                            <optgroup label="YOLOv8 (Empfohlen)">
+                                {% for model_id, model in yolo_models.items() if model_id.startswith('yolov8') %}
+                                <option value="{{ model_id }}"
+                                        data-description="{{ model.description }}"
+                                        data-params="{{ model.params }}"
+                                        data-speed="{{ model.speed }}"
+                                        data-map="{{ model.map_coco }}"
+                                        data-recommended="{{ model.recommended_for | join(', ') }}"
+                                        {% if model_id == 'yolov8s.pt' %}selected{% endif %}>
+                                    {{ model.name }} ({{ model.params }}, {{ model.speed }})
+                                </option>
+                                {% endfor %}
+                            </optgroup>
+                            <optgroup label="YOLOv5 (Alternative)">
+                                {% for model_id, model in yolo_models.items() if model_id.startswith('yolov5') %}
+                                <option value="{{ model_id }}"
+                                        data-description="{{ model.description }}"
+                                        data-params="{{ model.params }}"
+                                        data-speed="{{ model.speed }}"
+                                        data-map="{{ model.map_coco }}"
+                                        data-recommended="{{ model.recommended_for | join(', ') }}">
+                                    {{ model.name }} ({{ model.params }}, {{ model.speed }})
+                                </option>
+                                {% endfor %}
+                            </optgroup>
+                        </select>
+
+                        <!-- Modell-Info Box -->
+                        <div id="model-info" class="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm">
+                            <p id="model-description" class="text-gray-700 mb-2"></p>
+                            <div class="flex flex-wrap gap-4 text-gray-600">
+                                <span><strong>Parameter:</strong> <span id="model-params"></span></span>
+                                <span><strong>Speed:</strong> <span id="model-speed"></span></span>
+                                <span><strong>mAP (COCO):</strong> <span id="model-map"></span>%</span>
+                            </div>
+                            <p class="mt-2 text-gray-600">
+                                <strong>Empfohlen für:</strong> <span id="model-recommended"></span>
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Quick Recommendations -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            Schnellauswahl nach Anwendung
+                        </label>
+                        <div class="flex flex-wrap gap-2">
+                            {% for rec_id, rec in recommendations.items() %}
+                            <button type="button"
+                                    onclick="selectRecommendation('{{ rec.primary }}')"
+                                    class="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-full text-sm border"
+                                    title="{{ rec.description }}">
+                                {% if rec_id == 'player_tracking' %}Spieler-Tracking
+                                {% elif rec_id == 'ball_tracking' %}Ball-Tracking
+                                {% elif rec_id == 'full_detection' %}Alle Objekte
+                                {% elif rec_id == 'realtime' %}Echtzeit
+                                {% else %}{{ rec_id }}{% endif %}
                             </button>
-                            {% elif run.status == 'running' %}
-                            <a href="{{ url_for('training.detail', run_id=run.id) }}"
-                               class="text-blue-600 hover:underline text-sm">Details</a>
-                            {% elif run.status == 'failed' %}
-                            <span class="text-red-500 text-sm" title="{{ run.error_message }}">
-                                Fehler anzeigen
-                            </span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <!-- Erweiterte Optionen -->
+                    <details class="border rounded-lg">
+                        <summary class="px-4 py-3 cursor-pointer bg-gray-50 hover:bg-gray-100 rounded-t-lg font-medium">
+                            Erweiterte Optionen
+                        </summary>
+                        <div class="p-4 space-y-4">
+                            <!-- Modell-Name -->
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">
+                                    Modell-Name (optional)
+                                </label>
+                                <input type="text" id="model-name" name="model_name"
+                                       placeholder="z.B. floorball_v1"
+                                       class="w-full border rounded-lg px-3 py-2">
+                            </div>
+
+                            <!-- Training Parameter Grid -->
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">
+                                        Epochs
+                                    </label>
+                                    <input type="number" id="epochs" name="epochs"
+                                           value="{{ training_defaults.epochs or 100 }}" min="1" max="1000"
+                                           class="w-full border rounded-lg px-3 py-2">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">
+                                        Batch Size
+                                    </label>
+                                    <select id="batch-size" name="batch_size"
+                                            class="w-full border rounded-lg px-3 py-2">
+                                        <option value="4">4 (wenig VRAM)</option>
+                                        <option value="8">8</option>
+                                        <option value="16" selected>16 (Standard)</option>
+                                        <option value="32">32</option>
+                                        <option value="64">64 (viel VRAM)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">
+                                        Bildgrösse
+                                    </label>
+                                    <select id="image-size" name="image_size"
+                                            class="w-full border rounded-lg px-3 py-2">
+                                        <option value="640">640px (schnell)</option>
+                                        <option value="800">800px</option>
+                                        <option value="1080" selected>1080px (HD)</option>
+                                        <option value="1280">1280px (P6)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">
+                                        Early Stop
+                                    </label>
+                                    <input type="number" id="patience" name="patience"
+                                           value="{{ training_defaults.patience or 50 }}" min="0" max="200"
+                                           class="w-full border rounded-lg px-3 py-2"
+                                           title="Training stoppt nach N Epochs ohne Verbesserung">
+                                </div>
+                            </div>
+
+                            <!-- Train/Val Split -->
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">
+                                    Train/Validation Split
+                                </label>
+                                <div class="flex items-center gap-4">
+                                    <div class="flex-1">
+                                        <input type="range" id="train-split" name="train_split"
+                                               min="0.5" max="0.95" step="0.05" value="0.8"
+                                               class="w-full" oninput="updateSplitDisplay()">
+                                    </div>
+                                    <div class="w-32 text-sm text-center">
+                                        <span id="split-display" class="font-mono">80% / 20%</span>
+                                    </div>
+                                </div>
+                                <p class="text-xs text-gray-500 mt-1">
+                                    Training / Validation Aufteilung der Daten
+                                </p>
+                            </div>
+
+                            <!-- Augmentation -->
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">
+                                    Data Augmentation
+                                </label>
+                                <div class="grid grid-cols-3 gap-3">
+                                    {% for aug_id, aug in augmentation_presets.items() %}
+                                    <label class="cursor-pointer">
+                                        <input type="radio" name="augmentation" value="{{ aug_id }}"
+                                               {% if aug_id == 'medium' %}checked{% endif %}
+                                               class="sr-only peer">
+                                        <div class="border rounded-lg p-3 peer-checked:border-blue-500 peer-checked:bg-blue-50 hover:bg-gray-50">
+                                            <div class="font-medium">{{ aug.name }}</div>
+                                            <div class="text-xs text-gray-500">{{ aug.description }}</div>
+                                        </div>
+                                    </label>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                    </details>
+
+                    <!-- Submit Button -->
+                    <div class="pt-4">
+                        <button type="submit" id="start-training-btn"
+                                class="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 font-medium disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                {% if not available_exports %}disabled{% endif %}>
+                            Training starten
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Training Runs Tabelle -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold mb-4">Training Historie</h2>
+
+                {% if runs %}
+                <div class="overflow-x-auto">
+                    <table class="min-w-full">
+                        <thead>
+                            <tr class="border-b text-left">
+                                <th class="py-2 pr-4">Modell</th>
+                                <th class="py-2 pr-4">Basis</th>
+                                <th class="py-2 pr-4">Status</th>
+                                <th class="py-2 pr-4">mAP@50</th>
+                                <th class="py-2 pr-4">Dauer</th>
+                                <th class="py-2 pr-4">Erstellt</th>
+                                <th class="py-2">Aktionen</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for run in runs %}
+                            <tr class="border-b hover:bg-gray-50" id="run-{{ run.id }}">
+                                <td class="py-3 pr-4 font-medium">{{ run.model_name }}</td>
+                                <td class="py-3 pr-4 text-sm text-gray-500">{{ run.base_model }}</td>
+                                <td class="py-3 pr-4">
+                                    {% if run.status == 'completed' %}
+                                    <span class="bg-green-100 text-green-800 px-2 py-1 rounded text-sm">Fertig</span>
+                                    {% elif run.status == 'running' %}
+                                    <div class="space-y-1">
+                                        <div class="flex items-center gap-2">
+                                            <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm animate-pulse">Läuft</span>
+                                            <button onclick="cancelTraining('{{ run.id }}', '{{ run.model_name }}')"
+                                                    class="text-red-500 hover:text-red-700 text-xs"
+                                                    title="Training abbrechen">
+                                                ✕
+                                            </button>
+                                        </div>
+                                        <div class="w-32">
+                                            <div class="bg-gray-200 rounded-full h-2">
+                                                <div id="progress-{{ run.id }}" class="bg-blue-500 h-2 rounded-full transition-all" style="width: 0%"></div>
+                                            </div>
+                                            <span id="progress-text-{{ run.id }}" class="text-xs text-gray-500">Startet...</span>
+                                        </div>
+                                        <!-- GPU Status -->
+                                        <div id="gpu-status-{{ run.id }}" class="text-xs text-gray-400"></div>
+                                    </div>
+                                    {% elif run.status == 'failed' %}
+                                    <span class="bg-red-100 text-red-800 px-2 py-1 rounded text-sm cursor-help" title="{{ run.error_message }}">Fehler</span>
+                                    {% elif run.status == 'cancelled' %}
+                                    <span class="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-sm cursor-help" title="{{ run.error_message }}">Abgebrochen</span>
+                                    {% else %}
+                                    <span class="bg-gray-100 text-gray-800 px-2 py-1 rounded text-sm">{{ run.status }}</span>
+                                    {% endif %}
+                                </td>
+                                <td class="py-3 pr-4">
+                                    {% if run.final_map50 %}
+                                    <span class="font-mono">{{ "%.1f"|format(run.final_map50 * 100) }}%</span>
+                                    {% else %}-{% endif %}
+                                </td>
+                                <td class="py-3 pr-4 text-sm text-gray-500">
+                                    {% if run.training_time %}
+                                    {{ "%.0f"|format(run.training_time / 60) }} min
+                                    {% else %}-{% endif %}
+                                </td>
+                                <td class="py-3 pr-4 text-sm text-gray-500">
+                                    {{ run.created_at.strftime('%d.%m.%Y %H:%M') if run.created_at else '-' }}
+                                </td>
+                                <td class="py-3">
+                                    <div class="flex gap-2 flex-wrap">
+                                        <a href="{{ url_for('training.detail', run_id=run.id) }}"
+                                           class="text-blue-600 hover:underline text-sm">Details</a>
+                                        {% if run.status == 'completed' and run.model_path %}
+                                        <button onclick="activateModel('{{ run.id }}')"
+                                                class="bg-green-500 text-white px-3 py-1 rounded text-sm hover:bg-green-600">
+                                            Aktivieren
+                                        </button>
+                                        {% endif %}
+                                        {% if run.status in ['completed', 'failed', 'cancelled'] %}
+                                        <button onclick="retrain('{{ run.id }}')"
+                                                class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600"
+                                                title="Mit gleichen Einstellungen neu trainieren">
+                                            Retrain
+                                        </button>
+                                        {% endif %}
+                                        <button onclick="deleteRun('{{ run.id }}', '{{ run.model_name }}')"
+                                                class="text-red-600 hover:text-red-800 text-sm"
+                                                title="Training löschen">
+                                            🗑️
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-gray-500">Noch keine Trainings durchgeführt.</p>
+                {% endif %}
+            </div>
         </div>
-        {% else %}
-        <p class="text-gray-500">Noch keine Trainings durchgeführt.</p>
-        <p class="text-sm text-gray-400 mt-2">
-            Gehe zu <a href="{{ url_for('labeling.index') }}" class="text-blue-600 hover:underline">Labeling</a>,
-            um ein Dataset zu erstellen und das Training zu starten.
-        </p>
-        {% endif %}
+
+        <!-- Rechte Spalte: Info & Status -->
+        <div class="space-y-6">
+            <!-- Aktives Modell -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-lg font-semibold mb-4">Aktives Modell</h2>
+
+                {% if active_model %}
+                <div class="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="font-medium text-green-800">{{ active_model.model_name }}</span>
+                        <span class="bg-green-200 text-green-800 px-2 py-0.5 rounded-full text-xs">Aktiv</span>
+                    </div>
+                    <div class="text-sm text-green-700">
+                        <p>mAP@50: {{ "%.1f"|format(active_model.map50 * 100) if active_model.map50 else "N/A" }}%</p>
+                        <p class="text-xs text-green-600 mt-1 truncate" title="{{ active_model.model_path }}">
+                            {{ active_model.model_path }}
+                        </p>
+                    </div>
+                </div>
+                {% else %}
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center">
+                    <p class="text-gray-500">Kein Modell aktiv</p>
+                    <p class="text-xs text-gray-400 mt-1">Trainiere und aktiviere ein Modell</p>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Modell-Empfehlungen -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-lg font-semibold mb-4">Modell-Guide</h2>
+                <div class="space-y-4 text-sm">
+                    <div>
+                        <h3 class="font-medium text-gray-800">Spieler-Tracking</h3>
+                        <p class="text-gray-600">YOLOv8s empfohlen. Spieler sind gross genug, Geschwindigkeit ist wichtiger.</p>
+                    </div>
+                    <div>
+                        <h3 class="font-medium text-gray-800">Ball-Tracking</h3>
+                        <p class="text-gray-600">YOLOv8l oder v5l6 empfohlen. Grössere Modelle erkennen kleine Objekte besser.</p>
+                    </div>
+                    <div>
+                        <h3 class="font-medium text-gray-800">Echtzeit-Analyse</h3>
+                        <p class="text-gray-600">YOLOv8n für maximale FPS. Ideal bei schwacher Hardware.</p>
+                    </div>
+                    <div>
+                        <h3 class="font-medium text-gray-800">Offline-Analyse</h3>
+                        <p class="text-gray-600">YOLOv8x für beste Genauigkeit. Zeit spielt keine Rolle.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- GPU Info -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-lg font-semibold mb-4">Hardware-Tipps</h2>
+                <div class="space-y-3 text-sm text-gray-600">
+                    <p><strong>Batch Size:</strong> Reduzieren bei "Out of Memory" Fehlern</p>
+                    <p><strong>Bildgrösse:</strong> 640px für schnelles Training, 1080px für bessere Ergebnisse</p>
+                    <p><strong>Epochs:</strong> 100-300 für gute Ergebnisse, Early Stop verhindert Overfitting</p>
+                </div>
+            </div>
+
+            <!-- Live Training Log -->
+            {% if runs and runs|selectattr('status', 'equalto', 'running')|list %}
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-lg font-semibold mb-4">Live Training Log</h2>
+                <div id="live-gpu-info" class="mb-3 p-2 bg-gray-100 rounded text-sm">
+                    <span class="text-gray-500">GPU Status wird geladen...</span>
+                </div>
+                <div id="live-logs" class="bg-gray-900 text-green-400 p-3 rounded font-mono text-xs h-48 overflow-y-auto">
+                    <p class="text-gray-500">Logs werden geladen...</p>
+                </div>
+            </div>
+            {% endif %}
+        </div>
     </div>
 </div>
 
 <script>
+// Modell-Info aktualisieren
+function updateModelInfo() {
+    const select = document.getElementById('model-select');
+    const option = select.options[select.selectedIndex];
+
+    document.getElementById('model-description').textContent = option.dataset.description || '';
+    document.getElementById('model-params').textContent = option.dataset.params || '';
+    document.getElementById('model-speed').textContent = option.dataset.speed || '';
+    document.getElementById('model-map').textContent = option.dataset.map || '';
+    document.getElementById('model-recommended').textContent = option.dataset.recommended || '';
+}
+
+// Initial aufrufen
+updateModelInfo();
+
+// Empfehlung auswählen
+function selectRecommendation(modelId) {
+    const select = document.getElementById('model-select');
+    for (let i = 0; i < select.options.length; i++) {
+        if (select.options[i].value === modelId) {
+            select.selectedIndex = i;
+            updateModelInfo();
+            break;
+        }
+    }
+}
+
+// Split Display aktualisieren
+function updateSplitDisplay() {
+    const trainSplit = parseFloat(document.getElementById('train-split').value);
+    const valSplit = 1 - trainSplit;
+    document.getElementById('split-display').textContent =
+        `${Math.round(trainSplit * 100)}% / ${Math.round(valSplit * 100)}%`;
+}
+
+// Training starten
+document.getElementById('training-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const btn = document.getElementById('start-training-btn');
+    btn.disabled = true;
+    btn.textContent = 'Starte Training...';
+
+    const formData = {
+        export_path: document.getElementById('export-select').value,
+        base_model: document.getElementById('model-select').value,
+        model_name: document.getElementById('model-name').value,
+        epochs: parseInt(document.getElementById('epochs').value),
+        batch_size: parseInt(document.getElementById('batch-size').value),
+        image_size: parseInt(document.getElementById('image-size').value),
+        patience: parseInt(document.getElementById('patience').value),
+        train_split: parseFloat(document.getElementById('train-split').value),
+        augmentation: document.querySelector('input[name="augmentation"]:checked').value
+    };
+
+    try {
+        const response = await fetch('/training/api/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formData)
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert(`Training "${result.model_name}" gestartet!`);
+            location.reload();
+        } else {
+            alert('Fehler: ' + result.error);
+            btn.disabled = false;
+            btn.textContent = 'Training starten';
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = 'Training starten';
+    }
+});
+
+// Retrain - mit gleichen Einstellungen neu trainieren
+async function retrain(runId) {
+    if (!confirm('Training mit gleichen Einstellungen neu starten?')) return;
+
+    try {
+        const response = await fetch(`/training/api/retrain/${runId}`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert(`Training "${result.model_name}" gestartet!`);
+            location.reload();
+        } else {
+            alert('Fehler: ' + result.error);
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+
+// Progress-Polling für laufende Trainings
+const runningTrainings = [];
+{% for run in runs %}
+{% if run.status == 'running' %}
+runningTrainings.push('{{ run.id }}');
+{% endif %}
+{% endfor %}
+
+async function pollProgress() {
+    for (const runId of runningTrainings) {
+        try {
+            const response = await fetch(`/training/api/runs/${runId}/status`);
+            const result = await response.json();
+
+            if (result.status === 'completed' || result.status === 'failed') {
+                // Training beendet - Seite neu laden
+                location.reload();
+                return;
+            }
+
+            // Progress aktualisieren (aus results.csv)
+            const progressBar = document.getElementById(`progress-${runId}`);
+            const progressText = document.getElementById(`progress-text-${runId}`);
+
+            if (result.progress) {
+                const info = result.progress;
+                const progress = info.progress || 0;
+
+                if (progressBar) {
+                    progressBar.style.width = `${progress}%`;
+                }
+                if (progressText) {
+                    let text = `${info.epoch}/${info.total_epochs}`;
+                    if (info.current_map50) {
+                        text += ` (mAP: ${(info.current_map50 * 100).toFixed(1)}%)`;
+                    }
+                    progressText.textContent = text;
+                }
+            } else if (result.task && result.task.state === 'PROGRESS') {
+                // Fallback zu Celery task info
+                const info = result.task.info || {};
+                if (info.stage === 'preparing') {
+                    if (progressText) {
+                        progressText.textContent = 'Vorbereitung...';
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('Progress poll error:', err);
+        }
+    }
+}
+
+// Polling starten wenn laufende Trainings vorhanden
+if (runningTrainings.length > 0) {
+    pollProgress();
+    setInterval(pollProgress, 5000); // Alle 5 Sekunden
+}
+
+// Modell aktivieren
 async function activateModel(runId) {
     if (!confirm('Dieses Modell als aktives Modell setzen?')) return;
 
@@ -121,6 +585,130 @@ async function activateModel(runId) {
     } catch (err) {
         alert('Fehler: ' + err.message);
     }
+}
+
+// Training Run löschen
+async function deleteRun(runId, modelName) {
+    if (!confirm(`Training "${modelName}" wirklich löschen?\n\nDies löscht auch alle trainierten Modell-Dateien.`)) return;
+
+    try {
+        const response = await fetch(`/training/api/runs/${runId}`, {
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // Zeile aus Tabelle entfernen
+            const row = document.getElementById(`run-${runId}`);
+            if (row) {
+                row.remove();
+            }
+            alert(result.message);
+        } else {
+            alert('Fehler: ' + result.error);
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+
+// Training abbrechen
+async function cancelTraining(runId, modelName) {
+    if (!confirm(`Training "${modelName}" wirklich abbrechen?`)) return;
+
+    try {
+        const response = await fetch(`/training/api/runs/${runId}/cancel`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert(result.message);
+            location.reload();
+        } else {
+            alert('Fehler: ' + result.error);
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+
+// Live Logs und GPU Status abrufen
+async function fetchLiveLogs() {
+    if (runningTrainings.length === 0) return;
+
+    const runId = runningTrainings[0]; // Ersten laufenden Run verwenden
+
+    try {
+        const response = await fetch(`/training/api/runs/${runId}/logs`);
+        const result = await response.json();
+
+        // GPU Info aktualisieren
+        const gpuInfoEl = document.getElementById('live-gpu-info');
+        if (gpuInfoEl && result.gpu) {
+            const gpu = result.gpu;
+            const memPercent = Math.round((gpu.memory_used / gpu.memory_total) * 100);
+            gpuInfoEl.innerHTML = `
+                <div class="flex items-center gap-4">
+                    <span class="text-green-600 font-medium">● GPU aktiv</span>
+                    <span>Auslastung: <strong>${gpu.utilization}%</strong></span>
+                    <span>VRAM: <strong>${gpu.memory_used}/${gpu.memory_total} MB</strong> (${memPercent}%)</span>
+                    <span>Temp: <strong>${gpu.temperature}°C</strong></span>
+                </div>
+            `;
+        } else if (gpuInfoEl) {
+            gpuInfoEl.innerHTML = '<span class="text-yellow-600">⚠ GPU Status nicht verfügbar</span>';
+        }
+
+        // Logs aktualisieren
+        const logsEl = document.getElementById('live-logs');
+        if (logsEl && result.logs) {
+            // Filtere relevante Log-Zeilen (Training-Progress)
+            const relevantLogs = result.logs.filter(line =>
+                line.includes('Epoch') ||
+                line.includes('train:') ||
+                line.includes('val:') ||
+                line.includes('mAP') ||
+                line.includes('box_loss') ||
+                line.includes('Starting') ||
+                line.includes('GPU') ||
+                line.includes('Model summary')
+            );
+
+            if (relevantLogs.length > 0) {
+                logsEl.innerHTML = relevantLogs.map(line => {
+                    // ANSI Codes entfernen
+                    const cleanLine = line.replace(/\x1b\[[0-9;]*m/g, '').replace(/\[.*?m/g, '');
+                    return `<div class="py-0.5">${cleanLine}</div>`;
+                }).join('');
+                logsEl.scrollTop = logsEl.scrollHeight;
+            } else {
+                logsEl.innerHTML = result.logs.slice(-10).map(line => {
+                    const cleanLine = line.replace(/\x1b\[[0-9;]*m/g, '').replace(/\[.*?m/g, '');
+                    return `<div class="py-0.5 text-gray-400">${cleanLine}</div>`;
+                }).join('');
+            }
+        }
+
+        // GPU Status auch in der Tabelle anzeigen
+        for (const id of runningTrainings) {
+            const gpuStatusEl = document.getElementById(`gpu-status-${id}`);
+            if (gpuStatusEl && result.gpu) {
+                gpuStatusEl.innerHTML = `GPU: ${result.gpu.utilization}% | ${result.gpu.temperature}°C`;
+            }
+        }
+
+    } catch (err) {
+        console.error('Live logs error:', err);
+    }
+}
+
+// Live Logs Polling starten
+if (runningTrainings.length > 0) {
+    fetchLiveLogs();
+    setInterval(fetchLiveLogs, 3000); // Alle 3 Sekunden
 }
 </script>
 {% endblock %}

@@ -41,18 +41,20 @@
                 </div>
 
                 <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Batch-Name</label>
+                    <input type="text" name="batch_name" placeholder="z.B. Spiel_1_Halbzeit_1"
+                           class="w-full border rounded-lg px-3 py-2">
+                    <p class="text-xs text-gray-500 mt-1">Optional - sonst wird ein Name generiert</p>
+                </div>
+
+                <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Anzahl Frames</label>
                     <input type="number" name="num_frames" value="100" min="10" max="500"
                            class="w-full border rounded-lg px-3 py-2">
                 </div>
 
-                <button type="submit" id="add-batch-btn"
-                        class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 disabled:bg-gray-400">
-                    Batch hinzufügen
-                </button>
-
                 <button type="button" id="add-batch-open-btn" onclick="addBatchAndOpen()"
-                        class="w-full mt-2 bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 disabled:bg-gray-400">
+                        class="w-full bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 disabled:bg-gray-400">
                     Batch erstellen & in Label Studio öffnen
                 </button>
             </form>
@@ -78,9 +80,9 @@
                 <table class="min-w-full">
                     <thead>
                         <tr class="border-b">
-                            <th class="text-left py-2">Batch ID</th>
+                            <th class="text-left py-2">Batch Name</th>
                             <th class="text-left py-2">Frames</th>
-                            <th class="text-left py-2">Status</th>
+                            <th class="text-left py-2">Tab</th>
                             <th class="text-left py-2">Erstellt</th>
                             <th class="text-left py-2">Aktion</th>
                         </tr>
@@ -88,12 +90,18 @@
                     <tbody id="batches-table">
                         {% for batch in project.batches %}
                         <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="openBatch('{{ batch.batch_id }}')">
-                            <td class="py-3 font-mono text-sm">{{ batch.batch_id }}</td>
+                            <td class="py-3 font-medium">{{ batch.batch_id }}</td>
                             <td class="py-3">{{ batch.num_frames or 0 }}</td>
                             <td class="py-3">
-                                <span class="bg-green-100 text-green-800 px-2 py-1 rounded text-sm">
-                                    {{ batch.status }}
+                                {% if batch.task_ids and batch.task_ids|length > 0 %}
+                                <span class="bg-green-100 text-green-800 px-2 py-1 rounded text-xs" title="Eigener Tab in Label Studio">
+                                    Ja
                                 </span>
+                                {% else %}
+                                <span class="bg-gray-100 text-gray-500 px-2 py-1 rounded text-xs" title="Kein eigener Tab - älterer Batch">
+                                    Nein
+                                </span>
+                                {% endif %}
                             </td>
                             <td class="py-3 text-sm text-gray-500">
                                 {{ batch.created_at.strftime('%d.%m.%Y %H:%M') if batch.created_at else '-' }}
@@ -170,49 +178,6 @@
 <script>
 const projectId = '{{ project.id }}';
 
-// Batch hinzufügen
-document.getElementById('add-batch-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-
-    const form = e.target;
-    const btn = document.getElementById('add-batch-btn');
-    const progress = document.getElementById('batch-progress');
-
-    const data = {
-        project_id: projectId,
-        video_id: form.video_id.value,
-        num_frames: parseInt(form.num_frames.value)
-    };
-
-    btn.disabled = true;
-    progress.classList.remove('hidden');
-
-    try {
-        const response = await fetch('/labeling/api/add-batch', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(data)
-        });
-
-        const result = await response.json();
-
-        if (result.success) {
-            document.getElementById('progress-text').textContent =
-                `✓ ${result.frames_uploaded} Frames aus "${result.video_name}" hochgeladen!`;
-
-            setTimeout(() => location.reload(), 1500);
-        } else {
-            alert('Fehler: ' + result.error);
-            progress.classList.add('hidden');
-            btn.disabled = false;
-        }
-    } catch (err) {
-        alert('Fehler: ' + err.message);
-        progress.classList.add('hidden');
-        btn.disabled = false;
-    }
-});
-
 // Batch erstellen und in Label Studio öffnen
 async function addBatchAndOpen() {
     const form = document.getElementById('add-batch-form');
@@ -220,6 +185,7 @@ async function addBatchAndOpen() {
     const progress = document.getElementById('batch-progress');
 
     const videoId = form.video_id.value;
+    const batchName = form.batch_name.value.trim();
     const numFrames = parseInt(form.num_frames.value);
 
     if (!videoId) {
@@ -230,11 +196,11 @@ async function addBatchAndOpen() {
     const data = {
         project_id: projectId,
         video_id: videoId,
+        batch_name: batchName,
         num_frames: numFrames
     };
 
     btn.disabled = true;
-    document.getElementById('add-batch-btn').disabled = true;
     progress.classList.remove('hidden');
     document.getElementById('progress-text').textContent = 'Frames werden extrahiert und hochgeladen...';
 
@@ -260,13 +226,11 @@ async function addBatchAndOpen() {
             alert('Fehler: ' + result.error);
             progress.classList.add('hidden');
             btn.disabled = false;
-            document.getElementById('add-batch-btn').disabled = false;
         }
     } catch (err) {
         alert('Fehler: ' + err.message);
         progress.classList.add('hidden');
         btn.disabled = false;
-        document.getElementById('add-batch-btn').disabled = false;
     }
 }
 
@@ -277,6 +241,9 @@ async function openBatch(batchId) {
         const result = await response.json();
 
         if (result.url) {
+            if (!result.has_view) {
+                alert('Hinweis: Dieser Batch hat keinen eigenen Tab in Label Studio.\n\nÄltere Batches wurden ohne Task-IDs gespeichert und können daher nicht gefiltert werden.\n\nNeue Batches haben automatisch einen eigenen Tab.');
+            }
             window.open(result.url, '_blank');
         } else {
             alert('Fehler: ' + (result.error || 'Unbekannter Fehler'));
@@ -288,17 +255,23 @@ async function openBatch(batchId) {
 
 // Labels exportieren
 async function exportLabels() {
-    if (!confirm('Labels aus Label Studio exportieren?')) return;
+    // Dialog für Dataset-Name
+    const defaultName = '{{ project.title }}'.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const exportName = prompt('Name für das Dataset:', defaultName);
+
+    if (exportName === null) return; // Abgebrochen
 
     try {
         const response = await fetch(`/labeling/api/export/${projectId}`, {
-            method: 'POST'
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ export_name: exportName })
         });
 
         const result = await response.json();
 
         if (result.success) {
-            alert(`✓ Export erfolgreich!\n\nBilder: ${result.images}\nLabels: ${result.labels}\nPfad: ${result.path}`);
+            alert(`✓ Export erfolgreich!\n\nDataset: ${result.export_name}\nBilder: ${result.images}\nLabels: ${result.labels}\nPfad: ${result.path}`);
             location.reload();
         } else {
             alert('Fehler: ' + result.error);
