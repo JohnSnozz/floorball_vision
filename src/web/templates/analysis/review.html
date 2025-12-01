@@ -1,0 +1,620 @@
+{% extends "base.html" %}
+
+{% block title %}Tracking Review - Snippet {{ snippet.id }}{% endblock %}
+
+{% block head %}
+<style>
+    .video-container {
+        position: relative;
+        background: black;
+        display: inline-block;
+    }
+    #overlayCanvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        pointer-events: none;
+    }
+    .detection-info {
+        font-family: monospace;
+        font-size: 12px;
+    }
+    .field-detection {
+        color: #10B981;
+    }
+    .outside-detection {
+        color: #EF4444;
+    }
+    .controls-bar {
+        background: #1F2937;
+        padding: 1rem;
+    }
+    .timeline {
+        height: 8px;
+        background: #374151;
+        border-radius: 4px;
+        cursor: pointer;
+        position: relative;
+    }
+    .timeline-progress {
+        height: 100%;
+        background: #3B82F6;
+        border-radius: 4px;
+        position: absolute;
+        top: 0;
+        left: 0;
+    }
+    .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
+    }
+    .legend-color {
+        width: 16px;
+        height: 16px;
+        border-radius: 4px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="mb-4 flex items-center justify-between">
+    <div>
+        <h1 class="text-2xl font-bold text-gray-900">Tracking Review</h1>
+        <p class="text-gray-600">{{ video.filename }} - Snippet {{ snippet.id[-8:] }}</p>
+    </div>
+    <a href="/analysis/video/{{ video.id }}" class="text-blue-600 hover:text-blue-800">
+        &larr; Zurück zur Snippet-Auswahl
+    </a>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+    <!-- Video Player mit Overlay -->
+    <div class="lg:col-span-3">
+        <div class="bg-black rounded-lg overflow-hidden">
+            <div class="video-container" id="videoContainer">
+                <video id="videoPlayer"
+                       class="max-w-full"
+                       src="/analysis/clips/{{ video.id }}/{{ snippet.id }}.mp4"
+                       preload="metadata">
+                </video>
+                <canvas id="overlayCanvas"></canvas>
+            </div>
+
+            <!-- Controls -->
+            <div class="controls-bar">
+                <div class="timeline mb-4" id="timeline">
+                    <div class="timeline-progress" id="timelineProgress"></div>
+                </div>
+
+                <div class="flex items-center gap-4">
+                    <button id="playPauseBtn" class="bg-white text-gray-900 px-4 py-2 rounded-lg font-medium min-w-[80px]">
+                        Play
+                    </button>
+
+                    <button id="prevFrameBtn" class="bg-gray-600 hover:bg-gray-500 text-white px-3 py-2 rounded-lg">
+                        &larr; Frame
+                    </button>
+                    <button id="nextFrameBtn" class="bg-gray-600 hover:bg-gray-500 text-white px-3 py-2 rounded-lg">
+                        Frame &rarr;
+                    </button>
+
+                    <span id="currentFrame" class="text-white font-mono">Frame 0</span>
+                    <span class="text-gray-400">/</span>
+                    <span id="totalFrames" class="text-white font-mono">0</span>
+
+                    <span id="currentTime" class="text-gray-400 font-mono ml-4">00:00.0</span>
+
+                    <div class="flex-1"></div>
+
+                    <label class="flex items-center gap-2 text-white">
+                        <input type="checkbox" id="showOutside" class="form-checkbox">
+                        <span>Ausserhalb anzeigen</span>
+                    </label>
+
+                    <label class="flex items-center gap-2 text-white">
+                        <input type="checkbox" id="showLabels" class="form-checkbox" checked>
+                        <span>Labels anzeigen</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Legende -->
+        <div class="mt-4 bg-white rounded-lg shadow p-4">
+            <h3 class="font-semibold mb-3">Legende</h3>
+            <div class="flex flex-wrap gap-6" id="legendContainer">
+                <div class="legend-item">
+                    <div class="legend-color" id="legendTeam1" style="background: #3B82F6;"></div>
+                    <span id="legendTeam1Label">Team 1</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" id="legendTeam2" style="background: #FFFFFF; border: 1px solid #ccc;"></div>
+                    <span id="legendTeam2Label">Team 2</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" id="legendReferee" style="background: #EC4899;"></div>
+                    <span>Schiedsrichter</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #F59E0B;"></div>
+                    <span>Ball</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #6B7280; opacity: 0.5;"></div>
+                    <span>Ausserhalb Spielfeld</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #8B5CF6;"></div>
+                    <span>Spielfeld-Polygon</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statistiken & Detektionen -->
+    <div class="space-y-4">
+        <!-- Statistiken -->
+        <div class="bg-white rounded-lg shadow p-4">
+            <h3 class="font-semibold mb-3">Statistiken</h3>
+            <div class="space-y-2 text-sm">
+                <div class="flex justify-between">
+                    <span class="text-gray-600">Frames:</span>
+                    <span id="statFrames" class="font-mono">-</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-600">FPS:</span>
+                    <span id="statFps" class="font-mono">-</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-600">Modell:</span>
+                    <span id="statModel" class="font-mono text-xs">-</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-600">Confidence:</span>
+                    <span id="statConf" class="font-mono">-</span>
+                </div>
+                <hr class="my-2">
+                <div class="flex justify-between">
+                    <span class="text-gray-600">Detektionen gesamt:</span>
+                    <span id="statTotal" class="font-mono">-</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-600">Im Spielfeld:</span>
+                    <span id="statInField" class="font-mono text-green-600">-</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-600">Ausserhalb:</span>
+                    <span id="statOutside" class="font-mono text-red-600">-</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Aktueller Frame -->
+        <div class="bg-white rounded-lg shadow p-4">
+            <h3 class="font-semibold mb-3">Aktueller Frame</h3>
+            <div id="currentDetections" class="space-y-2 text-sm max-h-64 overflow-y-auto">
+                <p class="text-gray-500">Keine Detektionen</p>
+            </div>
+        </div>
+
+        <!-- Track-Übersicht -->
+        <div class="bg-white rounded-lg shadow p-4">
+            <h3 class="font-semibold mb-3">Track-IDs</h3>
+            <div id="trackOverview" class="text-sm max-h-48 overflow-y-auto">
+                <p class="text-gray-500">Lade...</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const videoId = "{{ video.id }}";
+const snippetId = "{{ snippet.id }}";
+
+let trackingData = null;
+let currentFrameIdx = 0;
+
+const video = document.getElementById('videoPlayer');
+const canvas = document.getElementById('overlayCanvas');
+const ctx = canvas.getContext('2d');
+const videoContainer = document.getElementById('videoContainer');
+const playPauseBtn = document.getElementById('playPauseBtn');
+const prevFrameBtn = document.getElementById('prevFrameBtn');
+const nextFrameBtn = document.getElementById('nextFrameBtn');
+const timeline = document.getElementById('timeline');
+const timelineProgress = document.getElementById('timelineProgress');
+const showOutside = document.getElementById('showOutside');
+const showLabels = document.getElementById('showLabels');
+
+// Team-Farben (werden aus tracking_data überschrieben)
+let teamColors = {
+    team1: '#3B82F6',
+    team2: '#FFFFFF',
+    referee: '#EC4899'
+};
+
+// Farben für Objekte (Ball, etc.)
+const objectColors = {
+    'sports ball': '#F59E0B',
+    'ball': '#F59E0B',
+    'default': '#6B7280'
+};
+
+function getDetectionColor(det) {
+    // Ball
+    if (det.class_name === 'sports ball' || det.class_name === 'ball') {
+        return objectColors.ball;
+    }
+
+    // Team-basierte Farbe für Spieler
+    if (det.team && det.in_field) {
+        if (det.team === 'team1') return teamColors.team1;
+        if (det.team === 'team2') return teamColors.team2;
+        if (det.team === 'referee') return teamColors.referee;
+    }
+
+    // Fallback für Spieler ohne Team
+    if (det.class_name === 'person' && det.in_field) {
+        return '#10B981';  // Grün
+    }
+
+    return objectColors.default;
+}
+
+function formatTime(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toFixed(1).padStart(4, '0')}`;
+}
+
+async function loadTrackingData() {
+    try {
+        const response = await fetch(`/analysis/api/videos/${videoId}/snippets/${snippetId}/tracking`);
+        if (!response.ok) {
+            throw new Error('Tracking-Daten nicht gefunden');
+        }
+        trackingData = await response.json();
+
+        // Team-Farben aus Tracking-Daten laden
+        if (trackingData.team_config) {
+            teamColors.team1 = trackingData.team_config.team1?.displayColor || '#3B82F6';
+            teamColors.team2 = trackingData.team_config.team2?.displayColor || '#FFFFFF';
+            teamColors.referee = trackingData.team_config.referee?.displayColor || '#EC4899';
+
+            // Legende aktualisieren
+            document.getElementById('legendTeam1').style.background = teamColors.team1;
+            document.getElementById('legendTeam2').style.background = teamColors.team2;
+            document.getElementById('legendReferee').style.background = teamColors.referee;
+            document.getElementById('legendTeam1Label').textContent =
+                'Team 1: ' + (trackingData.team_config.team1?.color || 'Team 1');
+            document.getElementById('legendTeam2Label').textContent =
+                'Team 2: ' + (trackingData.team_config.team2?.color || 'Team 2');
+        }
+
+        // Statistiken anzeigen
+        document.getElementById('statFrames').textContent = trackingData.tracked_frames || trackingData.total_frames;
+        document.getElementById('statFps').textContent = (trackingData.tracking_fps || trackingData.fps || 0).toFixed(1);
+        document.getElementById('statModel').textContent = (trackingData.model || '-').split('/').pop();
+        document.getElementById('statConf').textContent = trackingData.conf_threshold;
+        document.getElementById('totalFrames').textContent = trackingData.tracked_frames || trackingData.total_frames;
+
+        // Zähle Detektionen
+        let total = 0, inField = 0, outside = 0;
+        trackingData.frames.forEach(frame => {
+            frame.detections.forEach(det => {
+                total++;
+                if (det.in_field) inField++;
+                else outside++;
+            });
+        });
+        document.getElementById('statTotal').textContent = total;
+        document.getElementById('statInField').textContent = inField;
+        document.getElementById('statOutside').textContent = outside;
+
+        // Track-Übersicht mit Team und Rückennummer
+        const teamAssignments = trackingData.track_team_assignments || {};
+        const jerseyNumbers = trackingData.track_jersey_numbers || {};
+
+        const trackIds = new Set();
+        trackingData.frames.forEach(frame => {
+            frame.detections.forEach(det => {
+                if (det.track_id !== undefined && det.in_field) {
+                    trackIds.add(det.track_id);
+                }
+            });
+        });
+
+        const trackOverview = document.getElementById('trackOverview');
+        if (trackIds.size > 0) {
+            trackOverview.innerHTML = Array.from(trackIds).sort((a, b) => a - b).map(id => {
+                const teamInfo = teamAssignments[id];
+                const jerseyInfo = jerseyNumbers[id];
+
+                let bgColor = '#E5E7EB';
+                let textColor = '#374151';
+                if (teamInfo) {
+                    if (teamInfo.team === 'team1') {
+                        bgColor = teamColors.team1;
+                        textColor = isLightColor(bgColor) ? '#000' : '#FFF';
+                    } else if (teamInfo.team === 'team2') {
+                        bgColor = teamColors.team2;
+                        textColor = isLightColor(bgColor) ? '#000' : '#FFF';
+                    } else if (teamInfo.team === 'referee') {
+                        bgColor = teamColors.referee;
+                        textColor = isLightColor(bgColor) ? '#000' : '#FFF';
+                    }
+                }
+
+                let label = `#${id}`;
+                if (jerseyInfo && jerseyInfo.primary) {
+                    label += ` (${jerseyInfo.primary})`;
+                }
+
+                return `<span class="inline-block px-2 py-1 rounded mr-1 mb-1" style="background: ${bgColor}; color: ${textColor};">${label}</span>`;
+            }).join('');
+        } else {
+            trackOverview.innerHTML = '<p class="text-gray-500">Keine Tracks</p>';
+        }
+
+        drawOverlay();
+    } catch (e) {
+        console.error('Fehler beim Laden:', e);
+        alert('Fehler beim Laden der Tracking-Daten: ' + e.message);
+    }
+}
+
+function isLightColor(hex) {
+    // Prüft ob eine Farbe hell ist (für Kontrasttext)
+    const c = hex.substring(1);
+    const rgb = parseInt(c, 16);
+    const r = (rgb >> 16) & 0xff;
+    const g = (rgb >> 8) & 0xff;
+    const b = (rgb >> 0) & 0xff;
+    const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    return luma > 180;
+}
+
+function resizeCanvas() {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.style.width = video.clientWidth + 'px';
+    canvas.style.height = video.clientHeight + 'px';
+}
+
+function drawOverlay() {
+    if (!trackingData) return;
+
+    resizeCanvas();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Skalierungsfaktoren
+    const scaleX = canvas.width / video.videoWidth;
+    const scaleY = canvas.height / video.videoHeight;
+
+    // Spielfeld-Polygon zeichnen (falls vorhanden)
+    if (trackingData.field_polygon && trackingData.field_polygon.length >= 3) {
+        ctx.beginPath();
+        ctx.moveTo(trackingData.field_polygon[0][0], trackingData.field_polygon[0][1]);
+        for (let i = 1; i < trackingData.field_polygon.length; i++) {
+            ctx.lineTo(trackingData.field_polygon[i][0], trackingData.field_polygon[i][1]);
+        }
+        ctx.closePath();
+        ctx.strokeStyle = '#8B5CF6';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    // Frame-Daten
+    const frameData = trackingData.frames[currentFrameIdx];
+    if (!frameData) return;
+
+    const showOutsideChecked = showOutside.checked;
+    const showLabelsChecked = showLabels.checked;
+
+    // Aktuelle Detektionen anzeigen
+    const detectionsList = document.getElementById('currentDetections');
+    const detectionItems = [];
+
+    // Team-Zuweisungen und Rückennummern aus Tracking-Daten
+    const teamAssignments = trackingData.track_team_assignments || {};
+    const jerseyNumbers = trackingData.track_jersey_numbers || {};
+
+    frameData.detections.forEach(det => {
+        // Skip Detektionen ausserhalb, wenn nicht angezeigt
+        if (!det.in_field && !showOutsideChecked) return;
+
+        const [x1, y1, x2, y2] = det.bbox;
+        const width = x2 - x1;
+        const height = y2 - y1;
+
+        // Farbe basierend auf Team (aus finaler Zuweisung)
+        let color = getDetectionColor(det);
+        if (det.track_id !== undefined && teamAssignments[det.track_id]) {
+            const finalTeam = teamAssignments[det.track_id].team;
+            if (finalTeam === 'team1') color = teamColors.team1;
+            else if (finalTeam === 'team2') color = teamColors.team2;
+            else if (finalTeam === 'referee') color = teamColors.referee;
+        }
+
+        let alpha = det.in_field ? 1.0 : 0.4;
+
+        // Box zeichnen
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 3;
+        ctx.globalAlpha = alpha;
+        ctx.strokeRect(x1, y1, width, height);
+
+        // Fusspunkt markieren (Mittelpunkt unten)
+        const footX = (x1 + x2) / 2;
+        const footY = y2;
+        ctx.beginPath();
+        ctx.arc(footX, footY, 4, 0, Math.PI * 2);
+        ctx.fillStyle = det.in_field ? color : '#EF4444';
+        ctx.fill();
+
+        // Label
+        if (showLabelsChecked) {
+            // Rückennummer aus finaler Zuweisung
+            let jerseyNum = '';
+            if (det.track_id !== undefined && jerseyNumbers[det.track_id]) {
+                jerseyNum = ` #${jerseyNumbers[det.track_id].primary}`;
+            }
+
+            const label = det.track_id !== undefined
+                ? `ID${det.track_id}${jerseyNum}`
+                : `${det.class_name}`;
+
+            ctx.font = 'bold 13px sans-serif';
+            const textWidth = ctx.measureText(label).width;
+
+            ctx.fillStyle = color;
+            ctx.globalAlpha = 0.9;
+            ctx.fillRect(x1, y1 - 20, textWidth + 10, 20);
+
+            ctx.globalAlpha = 1.0;
+            ctx.fillStyle = isLightColor(color) ? '#000' : '#FFF';
+            ctx.fillText(label, x1 + 5, y1 - 5);
+        }
+
+        ctx.globalAlpha = 1.0;
+
+        // Zur Liste hinzufügen
+        const inFieldClass = det.in_field ? 'field-detection' : 'outside-detection';
+        const teamLabel = det.team ? ` [${det.team}]` : '';
+        const jerseyLabel = (det.track_id !== undefined && jerseyNumbers[det.track_id])
+            ? ` #${jerseyNumbers[det.track_id].primary}` : '';
+
+        detectionItems.push(`
+            <div class="detection-info ${inFieldClass}" style="border-left: 3px solid ${color}; padding-left: 6px;">
+                ${det.track_id !== undefined ? `ID${det.track_id}${jerseyLabel}` : det.class_name}
+                ${teamLabel}
+                <span class="text-gray-500">(${(det.conf * 100).toFixed(0)}%)</span>
+            </div>
+        `);
+    });
+
+    if (detectionItems.length > 0) {
+        detectionsList.innerHTML = detectionItems.join('');
+    } else {
+        detectionsList.innerHTML = '<p class="text-gray-500">Keine Detektionen</p>';
+    }
+}
+
+function updateFrameFromTime() {
+    if (!trackingData || !trackingData.frames) return;
+
+    // Finde den nächsten Frame-Index basierend auf aktueller Video-Zeit
+    const currentTime = video.currentTime;
+    let closestIdx = 0;
+    let closestDiff = Infinity;
+
+    for (let i = 0; i < trackingData.frames.length; i++) {
+        const frameDiff = Math.abs(trackingData.frames[i].timestamp - currentTime);
+        if (frameDiff < closestDiff) {
+            closestDiff = frameDiff;
+            closestIdx = i;
+        }
+    }
+
+    currentFrameIdx = closestIdx;
+
+    document.getElementById('currentFrame').textContent = `Frame ${currentFrameIdx + 1}`;
+    document.getElementById('currentTime').textContent = formatTime(currentTime);
+
+    const progress = ((currentFrameIdx + 1) / trackingData.frames.length) * 100;
+    timelineProgress.style.width = `${progress}%`;
+
+    drawOverlay();
+}
+
+function seekToFrame(frameIdx) {
+    if (!trackingData || !trackingData.frames) return;
+
+    frameIdx = Math.max(0, Math.min(frameIdx, trackingData.frames.length - 1));
+    currentFrameIdx = frameIdx;
+
+    // Setze Video auf den Timestamp dieses Frames
+    video.currentTime = trackingData.frames[frameIdx].timestamp;
+}
+
+// Event Listeners
+video.addEventListener('loadedmetadata', () => {
+    resizeCanvas();
+    loadTrackingData();
+});
+
+video.addEventListener('timeupdate', updateFrameFromTime);
+video.addEventListener('seeked', updateFrameFromTime);
+
+video.addEventListener('play', () => {
+    playPauseBtn.textContent = 'Pause';
+});
+
+video.addEventListener('pause', () => {
+    playPauseBtn.textContent = 'Play';
+    drawOverlay();
+});
+
+playPauseBtn.addEventListener('click', () => {
+    if (video.paused) {
+        video.play();
+    } else {
+        video.pause();
+    }
+});
+
+prevFrameBtn.addEventListener('click', () => {
+    video.pause();
+    seekToFrame(currentFrameIdx - 1);
+});
+
+nextFrameBtn.addEventListener('click', () => {
+    video.pause();
+    seekToFrame(currentFrameIdx + 1);
+});
+
+timeline.addEventListener('click', (e) => {
+    if (!trackingData || !trackingData.frames) return;
+    const rect = timeline.getBoundingClientRect();
+    const percent = (e.clientX - rect.left) / rect.width;
+    const frameIdx = Math.floor(percent * trackingData.frames.length);
+    seekToFrame(frameIdx);
+});
+
+showOutside.addEventListener('change', drawOverlay);
+showLabels.addEventListener('change', drawOverlay);
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT') return;
+
+    if (e.key === ' ' || e.key === 'k') {
+        e.preventDefault();
+        playPauseBtn.click();
+    } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        video.pause();
+        seekToFrame(currentFrameIdx - (e.shiftKey ? 10 : 1));
+    } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        video.pause();
+        seekToFrame(currentFrameIdx + (e.shiftKey ? 10 : 1));
+    }
+});
+
+// Resize observer für Canvas
+const resizeObserver = new ResizeObserver(() => {
+    if (trackingData) {
+        resizeCanvas();
+        drawOverlay();
+    }
+});
+resizeObserver.observe(video);
+</script>
+{% endblock %}

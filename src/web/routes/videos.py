@@ -197,3 +197,87 @@ def thumbnail(video_id):
         abort(404)
 
     return send_file(thumbnail_path, mimetype="image/jpeg")
+
+
+@videos_bp.route("/<video_id>/stream", methods=["GET"])
+def stream_video(video_id):
+    """Video streamen mit Range-Request Support."""
+    from flask import send_file, abort, Response, request
+    from pathlib import Path
+
+    video = db.session.get(Video, video_id)
+    if not video:
+        abort(404)
+
+    if not video.file_path:
+        abort(404)
+
+    video_path = Path(video.file_path)
+    if not video_path.is_absolute():
+        # Relativer Pfad - vom Projekt-Root aus
+        project_root = Path(__file__).resolve().parent.parent.parent.parent
+        video_path = project_root / video.file_path
+
+    if not video_path.exists():
+        abort(404)
+
+    file_size = video_path.stat().st_size
+
+    # Bestimme MIME-Type
+    ext = video_path.suffix.lower()
+    mime_types = {
+        '.mp4': 'video/mp4',
+        '.webm': 'video/webm',
+        '.mov': 'video/quicktime',
+        '.avi': 'video/x-msvideo',
+        '.mkv': 'video/x-matroska',
+    }
+    mimetype = mime_types.get(ext, 'video/mp4')
+
+    # Range-Request Support für Seeking
+    range_header = request.headers.get('Range')
+
+    if range_header:
+        # Parse Range header
+        byte_start = 0
+        byte_end = file_size - 1
+
+        if range_header.startswith('bytes='):
+            range_spec = range_header[6:]
+            if '-' in range_spec:
+                start_str, end_str = range_spec.split('-', 1)
+                if start_str:
+                    byte_start = int(start_str)
+                if end_str:
+                    byte_end = int(end_str)
+
+        # Chunk-Größe begrenzen (1MB)
+        chunk_size = 1024 * 1024
+        byte_end = min(byte_end, byte_start + chunk_size - 1, file_size - 1)
+
+        content_length = byte_end - byte_start + 1
+
+        def generate():
+            with open(video_path, 'rb') as f:
+                f.seek(byte_start)
+                remaining = content_length
+                while remaining > 0:
+                    chunk = f.read(min(8192, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
+
+        response = Response(
+            generate(),
+            status=206,
+            mimetype=mimetype,
+            direct_passthrough=True
+        )
+        response.headers['Content-Range'] = f'bytes {byte_start}-{byte_end}/{file_size}'
+        response.headers['Accept-Ranges'] = 'bytes'
+        response.headers['Content-Length'] = content_length
+        return response
+
+    # Kein Range-Request - ganzes Video senden
+    return send_file(video_path, mimetype=mimetype)

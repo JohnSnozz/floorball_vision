@@ -118,6 +118,18 @@
             </a>
             <h1 class="text-2xl font-bold mt-2">Kalibrierung: {{ video.filename or video.original_filename }}</h1>
         </div>
+        {% if calibration %}
+        <div class="flex items-center gap-4">
+            <span class="text-sm text-gray-500">Bestehende Kalibrierung: {{ calibration.name }}</span>
+            <button onclick="enterReviewMode()" class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 flex items-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                </svg>
+                Kalibrierung anzeigen
+            </button>
+        </div>
+        {% endif %}
     </div>
 
     <!-- Workflow Steps -->
@@ -529,6 +541,9 @@
 
 <script>
 const videoId = '{{ video.id }}';
+const existingCalibration = {{ calibration.calibration_data | tojson | safe if calibration and calibration.calibration_data else 'null' }};
+const existingCalibrationId = {{ calibration.id | tojson | safe if calibration else 'null' }};
+const existingCalibrationName = {{ calibration.name | tojson | safe if calibration else 'null' }};
 let currentStep = 1;
 let screenshots = [];
 let selectedScreenshotIndices = [];  // Mehrfachauswahl
@@ -578,7 +593,276 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Work-in-Progress Daten laden (falls vorhanden)
     await loadWipData();
+
+    // Falls bestehende Kalibrierung: Parameter laden
+    if (existingCalibration) {
+        loadExistingCalibrationParams();
+    }
 });
+
+// ========================================
+// REVIEW-MODUS (für bestehende Kalibrierungen)
+// ========================================
+
+let isReviewMode = false;
+
+async function enterReviewMode() {
+    if (!existingCalibration) {
+        alert('Keine bestehende Kalibrierung gefunden.');
+        return;
+    }
+
+    console.log('Entering review mode with calibration:', existingCalibration);
+    isReviewMode = true;
+
+    // Parameter aus der bestehenden Kalibrierung laden
+    loadExistingCalibrationParams();
+
+    // Prüfen ob die nötigen Daten vorhanden sind
+    if (!pointPairs || pointPairs.length < 4) {
+        alert('Die bestehende Kalibrierung enthält keine gültigen Punkt-Paare.');
+        return;
+    }
+
+    // Alle Schritte als "completed" markieren und navigierbar machen
+    for (let i = 1; i <= 5; i++) {
+        const indicator = document.getElementById(`step${i}-indicator`);
+        indicator.classList.remove('pending');
+        indicator.classList.add('completed');
+    }
+
+    // Step 1: Screenshots laden und Auswahl wiederherstellen
+    await setupReviewStep1();
+
+    // Step 2: Entzerrungs-Parameter wiederherstellen
+    await setupReviewStep2();
+
+    // Step 3: Punkt-Paare wiederherstellen (wird bei goToStep(3) gemacht)
+
+    // Step 4 & 5: Overlays generieren
+    await setupReviewStep4And5();
+
+    // Kalibrierungsname setzen
+    document.getElementById('calibration-name').value = existingCalibrationName || 'Kalibrierung';
+
+    // Bei Step 1 starten (User kann durchblättern)
+    goToStep(1);
+
+    // Info anzeigen
+    showReviewModeInfo();
+}
+
+function showReviewModeInfo() {
+    // Info-Banner oben anzeigen
+    const banner = document.createElement('div');
+    banner.id = 'review-mode-banner';
+    banner.className = 'bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-4';
+    banner.innerHTML = `
+        <div class="flex items-center justify-between">
+            <div class="flex items-center">
+                <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
+                </svg>
+                <span><strong>Review-Modus:</strong> Du siehst die gespeicherte Kalibrierung "${existingCalibrationName}". Alle Schritte sind navigierbar.</span>
+            </div>
+            <button onclick="exitReviewMode()" class="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm">
+                Bearbeiten
+            </button>
+        </div>
+    `;
+
+    const container = document.querySelector('.container');
+    const firstChild = container.querySelector('.flex.items-center.justify-between');
+    if (firstChild && firstChild.nextSibling) {
+        container.insertBefore(banner, firstChild.nextSibling);
+    }
+}
+
+function exitReviewMode() {
+    isReviewMode = false;
+    const banner = document.getElementById('review-mode-banner');
+    if (banner) banner.remove();
+
+    // Schritte wieder auf normal setzen
+    for (let i = 2; i <= 5; i++) {
+        const indicator = document.getElementById(`step${i}-indicator`);
+        indicator.classList.remove('completed', 'active');
+        indicator.classList.add('pending');
+    }
+
+    goToStep(1);
+}
+
+async function setupReviewStep1() {
+    // Screenshots sollten bereits geladen sein
+    if (screenshots.length === 0) {
+        await loadExistingScreenshots();
+    }
+
+    // Falls Screenshot-Index in Kalibrierung gespeichert (optional)
+    // Ansonsten ersten Screenshot als aktiv setzen
+    if (screenshots.length > 0) {
+        if (selectedScreenshotIndices.length === 0) {
+            selectedScreenshotIndices = [0];
+        }
+        activeScreenshotIndex = selectedScreenshotIndices[0];
+
+        renderScreenshotGallery();
+        document.getElementById('screenshot-empty').classList.add('hidden');
+        document.getElementById('screenshot-gallery').classList.remove('hidden');
+        document.getElementById('step1-next').disabled = false;
+        document.getElementById('step1-status').textContent = `${selectedScreenshotIndices.length} Screenshot(s) - Review`;
+    }
+}
+
+async function setupReviewStep2() {
+    // Lens-Profil Select setzen
+    const lensSelect = document.getElementById('lens-profile-select');
+    if (savedUndistortParams.lensProfileId) {
+        lensSelect.value = savedUndistortParams.lensProfileId;
+        onProfileChange();
+    }
+
+    // Zoom und Rotation setzen
+    document.getElementById('zoom-slider').value = savedUndistortParams.zoomOut || 1.2;
+    updateZoomValue();
+    document.getElementById('rotation-slider').value = savedUndistortParams.rotation || 0;
+    updateRotationValue();
+
+    // Falls Custom-Modus: k1-k4 setzen
+    if (savedUndistortParams.isCustom) {
+        if (savedUndistortParams.k1 !== null) {
+            document.getElementById('k1-slider').value = savedUndistortParams.k1;
+            updateSliderValue('k1');
+        }
+        if (savedUndistortParams.k2 !== null) {
+            document.getElementById('k2-slider').value = savedUndistortParams.k2;
+            updateSliderValue('k2');
+        }
+        if (savedUndistortParams.k3 !== null) {
+            document.getElementById('k3-slider').value = savedUndistortParams.k3;
+            updateSliderValue('k3');
+        }
+        if (savedUndistortParams.k4 !== null) {
+            document.getElementById('k4-slider').value = savedUndistortParams.k4;
+            updateSliderValue('k4');
+        }
+    }
+
+    // Original-Bild setzen
+    if (screenshots.length > 0 && activeScreenshotIndex !== null) {
+        const screenshot = screenshots[activeScreenshotIndex];
+        document.getElementById('original-preview').src =
+            `/calibration/screenshot/${videoId}/screenshots/${screenshot.filename}`;
+    }
+
+    // Entzerrtes Bild generieren
+    if (savedUndistortParams.lensProfileId) {
+        await undistortImage();
+        isUndistorted = true;
+        document.getElementById('step2-next').disabled = false;
+        document.getElementById('undistort-status').textContent = 'Aus Kalibrierung geladen';
+    }
+}
+
+async function setupReviewStep4And5() {
+    // Step 4: Overlay auf entzerrtem Bild
+    try {
+        const previewResponse = await fetch(`/calibration/api/videos/${videoId}/calibration/preview`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                point_pairs: pointPairs,
+                use_undistorted: true
+            })
+        });
+
+        const previewResult = await previewResponse.json();
+        if (previewResult.success) {
+            document.getElementById('overlay-undistorted').src =
+                `/calibration/screenshot/${videoId}/test_overlay.jpg?t=${Date.now()}`;
+        }
+    } catch (err) {
+        console.error('Error generating preview overlay:', err);
+    }
+
+    // Step 5: Overlay auf verzerrtem Bild
+    try {
+        const requestBody = {
+            point_pairs: pointPairs,
+            lens_profile_id: savedUndistortParams.lensProfileId,
+            screenshot_filename: null,
+            undistort_params: {
+                is_custom: savedUndistortParams.isCustom,
+                base_profile_id: savedUndistortParams.baseProfileId,
+                k1: savedUndistortParams.k1,
+                k2: savedUndistortParams.k2,
+                k3: savedUndistortParams.k3,
+                k4: savedUndistortParams.k4,
+                zoom_out: savedUndistortParams.zoomOut,
+                rotation: savedUndistortParams.rotation
+            }
+        };
+
+        const distortedResponse = await fetch(`/calibration/api/videos/${videoId}/calibration/distorted-overlay`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+
+        const distortedResult = await distortedResponse.json();
+        if (distortedResult.success) {
+            document.getElementById('overlay-distorted').src =
+                `/calibration/screenshot/${videoId}/distorted_overlay.jpg?t=${Date.now()}`;
+        }
+    } catch (err) {
+        console.error('Error generating distorted overlay:', err);
+    }
+}
+
+function loadExistingCalibrationParams() {
+    if (!existingCalibration) return;
+
+    console.log('Loading params from existing calibration:', existingCalibration);
+
+    // Punkt-Paare laden
+    if (existingCalibration.point_pairs) {
+        pointPairs = existingCalibration.point_pairs;
+        console.log('Loaded point pairs:', pointPairs.length);
+    }
+
+    // Lens-Profil ID aus Kalibrierung laden (oberste Ebene)
+    if (existingCalibration.lens_profile_id) {
+        selectedLensProfile = existingCalibration.lens_profile_id;
+        savedUndistortParams.lensProfileId = existingCalibration.lens_profile_id;
+        console.log('Loaded lens_profile_id:', selectedLensProfile);
+    }
+
+    // Undistort-Parameter laden
+    const undistortParams = existingCalibration.undistort_params;
+    if (undistortParams) {
+        // Falls lens_profile_id in undistort_params ist, überschreibe
+        if (undistortParams.lens_profile_id) {
+            savedUndistortParams.lensProfileId = undistortParams.lens_profile_id;
+            selectedLensProfile = undistortParams.lens_profile_id;
+        }
+        savedUndistortParams.isCustom = undistortParams.is_custom || false;
+        savedUndistortParams.baseProfileId = undistortParams.base_profile_id || null;
+        savedUndistortParams.k1 = undistortParams.k1;
+        savedUndistortParams.k2 = undistortParams.k2;
+        savedUndistortParams.k3 = undistortParams.k3;
+        savedUndistortParams.k4 = undistortParams.k4;
+        savedUndistortParams.zoomOut = undistortParams.zoom_out || 1.2;
+        savedUndistortParams.rotation = undistortParams.rotation || 0;
+
+        console.log('Loaded undistort params:', savedUndistortParams);
+    }
+
+    // Combined Calibration laden (Homography etc.)
+    if (existingCalibration.combined_calibration) {
+        console.log('Found combined_calibration with homography');
+    }
+}
 
 // ========================================
 // WORK-IN-PROGRESS PERSISTENCE
@@ -728,7 +1012,8 @@ function goToStep(step) {
             content.classList.remove('hidden');
             indicator.classList.remove('pending', 'completed');
             indicator.classList.add('active');
-        } else if (i < step) {
+        } else if (i < step || isReviewMode) {
+            // Im Review-Modus sind alle Schritte als "completed" navigierbar
             panel.classList.add('collapsed');
             panel.classList.remove('active');
             panel.classList.add('completed');
@@ -744,6 +1029,51 @@ function goToStep(step) {
         }
     }
     currentStep = step;
+
+    // Im Review-Modus: Canvas für Step 3 initialisieren wenn nötig
+    if (isReviewMode && step === 3) {
+        initializeCanvasesForReview();
+    }
+}
+
+async function initializeCanvasesForReview() {
+    // Canvas-Objekte nur initialisieren wenn noch nicht vorhanden
+    const needsImageCanvas = !imageCanvas;
+    const needsFieldCanvas = !fieldCanvas;
+
+    if (needsImageCanvas) {
+        imageCanvas = new CalibrationCanvas('image-canvas', {
+            mode: 'points',
+            pointColor: '#FF6B00',
+            onPointAdded: onImagePointAdded,
+            onPointRemoved: onImagePointRemoved
+        });
+
+        // Entzerrtes Bild generieren und laden
+        if (activeScreenshotIndex !== null && screenshots.length > 0) {
+            await generateUndistortedForStep3(activeScreenshotIndex);
+        }
+    }
+
+    if (needsFieldCanvas) {
+        fieldCanvas = new FieldCanvas('field-canvas', {
+            fieldLength: 40,
+            fieldWidth: 20,
+            pointColor: '#FF6B00',
+            onPointAdded: onFieldPointAdded,
+            onPointRemoved: onFieldPointRemoved,
+            svgUrl: '/static/images/Floorball_rink1.svg'
+        });
+        fieldCanvas.render();
+    }
+
+    // Screenshot-Selector befüllen
+    renderScreenshotSelector();
+
+    // Punkte in Canvas laden (kurz warten bis Bild geladen)
+    setTimeout(() => {
+        restorePointsToCanvases();
+    }, 500);
 }
 
 // ========================================
@@ -1654,23 +1984,31 @@ async function initializeCanvasesWithUndistorted() {
 }
 
 function restorePointsToCanvases() {
-    // Punkte aus pointPairs in die Canvas-Objekte laden
-    for (const pair of pointPairs) {
-        // Image Canvas Punkt hinzufügen
-        if (imageCanvas) {
-            imageCanvas.addPoint(pair.image.x, pair.image.y);
+    // Erst prüfen ob Canvas schon Punkte hat (vermeidet Duplikate)
+    const existingImagePoints = imageCanvas ? imageCanvas.getPoints().length : 0;
+    const existingFieldPoints = fieldCanvas ? fieldCanvas.getPoints().length : 0;
+
+    // Nur hinzufügen wenn Canvas leer ist
+    if (existingImagePoints === 0 && existingFieldPoints === 0) {
+        // Punkte aus pointPairs in die Canvas-Objekte laden
+        for (const pair of pointPairs) {
+            // Image Canvas Punkt hinzufügen
+            if (imageCanvas) {
+                imageCanvas.addPoint(pair.image.x, pair.image.y);
+            }
+            // Field Canvas Punkt hinzufügen
+            if (fieldCanvas) {
+                fieldCanvas.addPoint(pair.field.x, pair.field.y);
+            }
         }
-        // Field Canvas Punkt hinzufügen
-        if (fieldCanvas) {
-            fieldCanvas.addPoint(pair.field.x, pair.field.y);
-        }
+        console.log('Restored', pointPairs.length, 'point pairs to canvases');
+    } else {
+        console.log('Canvases already have points, skipping restore');
     }
 
     // UI aktualisieren
     updatePointCounts();
     updatePointPairsList();
-
-    console.log('Restored', pointPairs.length, 'point pairs to canvases');
 }
 
 async function generateUndistortedForStep3(screenshotIndex) {

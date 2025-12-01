@@ -1,0 +1,967 @@
+{% extends "base.html" %}
+
+{% block title %}Taktische Ansicht - {{ video.filename }}{% endblock %}
+
+{% block head %}
+<style>
+    .tactical-container {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+        height: calc(100vh - 220px);
+    }
+
+    @media (max-width: 1200px) {
+        .tactical-container {
+            grid-template-columns: 1fr;
+            grid-template-rows: 1fr 1fr;
+        }
+    }
+
+    .video-panel, .field-panel {
+        background: #1F2937;
+        border-radius: 0.5rem;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .panel-header {
+        background: #374151;
+        padding: 0.75rem 1rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .panel-content {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+        overflow: hidden;
+        padding: 10px;
+    }
+
+    #videoPlayer {
+        max-width: 100%;
+        max-height: 100%;
+    }
+
+    .field-wrapper {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    #fieldSvg {
+        max-width: 100%;
+        max-height: 100%;
+        border-radius: 8px;
+    }
+
+    #playersOverlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+    }
+
+    .controls {
+        background: #374151;
+        padding: 1rem;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .timeline {
+        flex: 1;
+        height: 8px;
+        background: #4B5563;
+        border-radius: 4px;
+        cursor: pointer;
+        position: relative;
+    }
+
+    .timeline-progress {
+        height: 100%;
+        background: #3B82F6;
+        border-radius: 4px;
+        width: 0%;
+    }
+
+    .legend {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+    }
+
+    .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+        font-size: 0.75rem;
+    }
+
+    .legend-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        border: 2px solid white;
+    }
+
+    .speed-btn {
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.75rem;
+        background: transparent;
+        border: 1px solid #6B7280;
+        color: #D1D5DB;
+        cursor: pointer;
+    }
+
+    .speed-btn.active {
+        background: #3B82F6;
+        border-color: #3B82F6;
+        color: white;
+    }
+
+    .debug-panel {
+        background: #1F2937;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin-top: 1rem;
+        font-family: monospace;
+        font-size: 12px;
+        color: #9CA3AF;
+        max-height: 150px;
+        overflow-y: auto;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-6" style="max-width: 1800px;">
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-4">
+        <div>
+            <a href="/analysis/video/{{ video.id }}" class="text-blue-500 hover:underline text-sm">
+                &larr; Zurück zur Analyse
+            </a>
+            <h1 class="text-xl font-bold mt-1 text-white">Taktische Ansicht: {{ video.filename }}</h1>
+            <p class="text-sm text-gray-400">Snippet: {{ snippet.id }}</p>
+        </div>
+        <div class="flex items-center gap-4">
+            <div class="legend">
+                <div class="legend-item">
+                    <div class="legend-dot" style="background: {{ team_config.team1.displayColor }};"></div>
+                    <span class="text-gray-300">Team 1</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-dot" style="background: {{ team_config.team2.displayColor }};"></div>
+                    <span class="text-gray-300">Team 2</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-dot" style="background: {{ team_config.referee.displayColor }}; width: 10px; height: 10px;"></div>
+                    <span class="text-gray-300">Schiri</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tactical View -->
+    <div class="tactical-container">
+        <!-- Video Panel -->
+        <div class="video-panel">
+            <div class="panel-header">
+                <h2 class="text-white font-medium">Video</h2>
+                <div class="flex items-center gap-4">
+                    <label class="flex items-center gap-2 text-gray-300 text-sm cursor-pointer">
+                        <input type="checkbox" id="showVideoOverlay" checked class="form-checkbox">
+                        Tracking
+                    </label>
+                    <label class="flex items-center gap-2 text-gray-300 text-sm cursor-pointer">
+                        <input type="checkbox" id="showFieldGrid" class="form-checkbox">
+                        Spielfeld-Grid
+                    </label>
+                    <span id="videoTime" class="text-gray-400 text-sm font-mono">00:00.0</span>
+                </div>
+            </div>
+            <div class="panel-content bg-black">
+                <div class="video-wrapper" style="position: relative; display: inline-block;">
+                    <video id="videoPlayer" preload="auto"></video>
+                    <canvas id="videoOverlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Field Panel -->
+        <div class="field-panel">
+            <div class="panel-header">
+                <h2 class="text-white font-medium">Spielfeld (40m x 20m)</h2>
+                <span id="frameInfo" class="text-gray-400 text-sm">Frame: -</span>
+            </div>
+            <div class="panel-content" id="fieldContainer">
+                <div class="field-wrapper">
+                    <img id="fieldSvg" src="/static/images/Floorball_rink1.svg" alt="Floorball Spielfeld">
+                    <svg id="playersOverlay" viewBox="0 0 40 20" preserveAspectRatio="xMidYMid meet">
+                        <!-- Spieler werden hier dynamisch eingefügt -->
+                    </svg>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls mt-4 rounded-lg">
+        <button id="playPauseBtn" class="bg-white text-gray-900 px-4 py-2 rounded font-medium">
+            Play
+        </button>
+
+        <div class="timeline" id="timeline">
+            <div class="timeline-progress" id="timelineProgress"></div>
+        </div>
+
+        <span id="currentTime" class="text-white font-mono text-sm">00:00.0</span>
+        <span class="text-gray-500">/</span>
+        <span id="duration" class="text-white font-mono text-sm">00:00.0</span>
+
+        <div class="flex gap-1">
+            <button class="speed-btn" data-speed="0.25">0.25x</button>
+            <button class="speed-btn" data-speed="0.5">0.5x</button>
+            <button class="speed-btn active" data-speed="1">1x</button>
+            <button class="speed-btn" data-speed="2">2x</button>
+        </div>
+
+        <div class="flex items-center gap-2">
+            <label class="text-gray-300 text-sm">Trail:</label>
+            <input type="range" id="trailLength" min="0" max="20" value="5" class="w-20">
+            <span id="trailValue" class="text-gray-400 text-sm">5</span>
+        </div>
+
+        <label class="flex items-center gap-2 text-gray-300 text-sm cursor-pointer">
+            <input type="checkbox" id="showDebug" class="form-checkbox">
+            Debug
+        </label>
+    </div>
+
+    <!-- Debug Panel -->
+    <div id="debugPanel" class="debug-panel hidden">
+        <div id="debugContent"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const videoId = "{{ video.id }}";
+const snippetId = "{{ snippet.id }}";
+const calibrationId = new URLSearchParams(window.location.search).get('calibration_id');
+const snippetClipPath = "{{ snippet.clip_path | default('') }}";
+const teamConfig = {{ team_config | tojson | safe }};
+
+// Floorball Spielfeld-Dimensionen (in Metern)
+const FIELD_LENGTH = 40;
+const FIELD_WIDTH = 20;
+
+const video = document.getElementById('videoPlayer');
+const playersOverlay = document.getElementById('playersOverlay');
+const playPauseBtn = document.getElementById('playPauseBtn');
+const timeline = document.getElementById('timeline');
+const timelineProgress = document.getElementById('timelineProgress');
+const currentTimeEl = document.getElementById('currentTime');
+const durationEl = document.getElementById('duration');
+const videoTimeEl = document.getElementById('videoTime');
+const frameInfoEl = document.getElementById('frameInfo');
+const trailLengthInput = document.getElementById('trailLength');
+const trailValueEl = document.getElementById('trailValue');
+const debugPanel = document.getElementById('debugPanel');
+const debugContent = document.getElementById('debugContent');
+
+let positionsData = null;
+let trackingData = null;
+let currentFrameIndex = 0;
+let trailLength = 5;
+let positionHistory = {};
+let showDebug = false;
+let showVideoOverlay = true;
+let showFieldGrid = false;
+
+// Video Overlay Canvas
+const videoOverlay = document.getElementById('videoOverlay');
+const videoCtx = videoOverlay.getContext('2d');
+
+// Homography-Funktionen für Spielfeld-Grid
+function applyHomography(H, x, y) {
+    // H ist 3x3 Matrix, transformiert (x,y) zu Pixel-Koordinaten
+    const w = H[2][0] * x + H[2][1] * y + H[2][2];
+    const px = (H[0][0] * x + H[0][1] * y + H[0][2]) / w;
+    const py = (H[1][0] * x + H[1][1] * y + H[1][2]) / w;
+    return [px, py];
+}
+
+function applyDistortion(px, py, k1, focal, cx, cy) {
+    // Inverse Fisheye-Verzerrung anwenden (von entzerrt zu verzerrt)
+    if (k1 === 0) return [px, py];
+
+    // Normalisierte Koordinaten
+    const xn = (px - cx) / focal;
+    const yn = (py - cy) / focal;
+    const r2 = xn * xn + yn * yn;
+
+    // Radiale Verzerrung
+    const distortion = 1 + k1 * r2;
+    const xd = xn * distortion;
+    const yd = yn * distortion;
+
+    // Zurück zu Pixel
+    return [xd * focal + cx, yd * focal + cy];
+}
+
+function fieldToPixel(fieldX, fieldY) {
+    if (!positionsData || !positionsData.inverse_homography) return null;
+
+    const H = positionsData.inverse_homography;
+    let [px, py] = applyHomography(H, fieldX, fieldY);
+
+    // Fisheye-Verzerrung anwenden falls vorhanden
+    if (positionsData.distortion && positionsData.distortion.k1 !== 0) {
+        const d = positionsData.distortion;
+        [px, py] = applyDistortion(px, py, d.k1, d.focal, d.cx, d.cy);
+    }
+
+    return [px, py];
+}
+
+// Video-Pfad setzen
+// clip_path ist z.B. "data/analysis/{video_id}/clips/{snippet_id}.mp4"
+// Die Route ist /analysis/clips/{video_id}/{filename}
+if (snippetClipPath) {
+    // Extrahiere Filename aus clip_path
+    const pathParts = snippetClipPath.split('/');
+    const filename = pathParts[pathParts.length - 1];
+    video.src = `/analysis/clips/${videoId}/${filename}`;
+    console.log('Video src:', video.src);
+} else {
+    // Fallback
+    video.src = `/analysis/clips/${videoId}/${snippetId}.mp4`;
+    console.log('Video src (fallback):', video.src);
+}
+
+function log(msg) {
+    if (showDebug) {
+        const time = new Date().toLocaleTimeString();
+        debugContent.innerHTML = `[${time}] ${msg}<br>` + debugContent.innerHTML;
+        if (debugContent.children.length > 50) {
+            debugContent.lastChild.remove();
+        }
+    }
+    console.log(msg);
+}
+
+function setupOverlay() {
+    const fieldImg = document.getElementById('fieldSvg');
+    const wrapper = fieldImg.parentElement;
+
+    // Overlay exakt über das Bild legen
+    const updateOverlayPosition = () => {
+        const imgRect = fieldImg.getBoundingClientRect();
+        const wrapperRect = wrapper.getBoundingClientRect();
+
+        playersOverlay.style.left = (imgRect.left - wrapperRect.left) + 'px';
+        playersOverlay.style.top = (imgRect.top - wrapperRect.top) + 'px';
+        playersOverlay.style.width = imgRect.width + 'px';
+        playersOverlay.style.height = imgRect.height + 'px';
+    };
+
+    fieldImg.onload = updateOverlayPosition;
+    window.addEventListener('resize', updateOverlayPosition);
+    updateOverlayPosition();
+}
+
+function setupVideoOverlay() {
+    // Canvas-Grösse an Video anpassen
+    const updateCanvasSize = () => {
+        if (video.videoWidth && video.videoHeight) {
+            videoOverlay.width = video.videoWidth;
+            videoOverlay.height = video.videoHeight;
+            log(`Video overlay canvas: ${videoOverlay.width}x${videoOverlay.height}`);
+        }
+    };
+
+    video.addEventListener('loadedmetadata', updateCanvasSize);
+    updateCanvasSize();
+}
+
+function drawFieldGrid() {
+    if (!showFieldGrid || !positionsData) return;
+
+    // Verwende vorberechnete Grid-Linien vom Backend (korrekte Fisheye-Projektion)
+    if (positionsData.grid_lines && positionsData.grid_lines.length > 0) {
+        drawPrecomputedGrid();
+        return;
+    }
+
+    // Fallback: Alte Methode (funktioniert nicht korrekt mit Fisheye)
+    log('WARNING: Using fallback grid drawing - may be inaccurate');
+    drawFallbackGrid();
+}
+
+function drawPrecomputedGrid() {
+    const gridLines = positionsData.grid_lines;
+
+    for (const element of gridLines) {
+        const points = element.points;
+        if (!points || points.length === 0) continue;
+
+        switch (element.type) {
+            case 'boundary':
+                videoCtx.strokeStyle = 'rgba(0, 255, 0, 0.9)';
+                videoCtx.lineWidth = 3;
+                drawPolyline(points);
+                break;
+
+            case 'midline':
+                videoCtx.strokeStyle = 'rgba(0, 255, 0, 0.7)';
+                videoCtx.lineWidth = 2;
+                drawPolyline(points);
+                break;
+
+            case 'goal_line':
+                videoCtx.strokeStyle = 'rgba(255, 0, 0, 0.7)';
+                videoCtx.lineWidth = 2;
+                drawPolyline(points);
+                break;
+
+            case 'center_circle':
+                videoCtx.strokeStyle = 'rgba(0, 255, 0, 0.7)';
+                videoCtx.lineWidth = 2;
+                drawPolyline(points);
+                break;
+
+            case 'center_point':
+                videoCtx.fillStyle = 'rgba(0, 255, 0, 0.9)';
+                if (points.length > 0) {
+                    videoCtx.beginPath();
+                    videoCtx.arc(points[0][0], points[0][1], 5, 0, Math.PI * 2);
+                    videoCtx.fill();
+                }
+                break;
+
+            case 'crease':
+                videoCtx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+                videoCtx.lineWidth = 2;
+                drawPolyline(points);
+                break;
+        }
+    }
+
+    // Debug: Ersten Punkt des Randes beschriften
+    if (gridLines.length > 0 && gridLines[0].points.length > 0) {
+        videoCtx.fillStyle = 'rgba(255, 255, 0, 0.9)';
+        videoCtx.font = 'bold 12px sans-serif';
+        const boundary = gridLines.find(g => g.type === 'boundary');
+        if (boundary && boundary.points.length >= 4) {
+            const labels = ['(0,0)', '(40,0)', '(40,20)', '(0,20)'];
+            for (let i = 0; i < 4; i++) {
+                const p = boundary.points[i];
+                videoCtx.fillText(labels[i], p[0] + 5, p[1] - 5);
+            }
+        }
+    }
+}
+
+function drawPolyline(points) {
+    if (points.length < 2) return;
+
+    videoCtx.beginPath();
+    videoCtx.moveTo(points[0][0], points[0][1]);
+    for (let i = 1; i < points.length; i++) {
+        videoCtx.lineTo(points[i][0], points[i][1]);
+    }
+    videoCtx.stroke();
+}
+
+function drawFallbackGrid() {
+    // Alte Fallback-Methode für Grid-Zeichnung
+    if (!positionsData.inverse_homography) return;
+
+    videoCtx.strokeStyle = 'rgba(0, 255, 0, 0.7)';
+    videoCtx.lineWidth = 2;
+
+    const L = 40, W = 20;
+
+    function drawLine(x1, y1, x2, y2) {
+        const p1 = fieldToPixel(x1, y1);
+        const p2 = fieldToPixel(x2, y2);
+        if (!p1 || !p2) return;
+        videoCtx.beginPath();
+        videoCtx.moveTo(p1[0], p1[1]);
+        videoCtx.lineTo(p2[0], p2[1]);
+        videoCtx.stroke();
+    }
+
+    // Spielfeld-Rand
+    videoCtx.strokeStyle = 'rgba(0, 255, 0, 0.9)';
+    videoCtx.lineWidth = 3;
+    drawLine(0, 0, L, 0);
+    drawLine(L, 0, L, W);
+    drawLine(L, W, 0, W);
+    drawLine(0, W, 0, 0);
+
+    // Mittellinie
+    videoCtx.strokeStyle = 'rgba(0, 255, 0, 0.7)';
+    videoCtx.lineWidth = 2;
+    drawLine(L/2, 0, L/2, W);
+}
+
+function drawVideoOverlay() {
+    // Canvas leeren
+    videoCtx.clearRect(0, 0, videoOverlay.width, videoOverlay.height);
+
+    // Spielfeld-Grid zuerst (unter den Tracking-Boxen)
+    drawFieldGrid();
+
+    if (!showVideoOverlay || !trackingData || !trackingData.frames) {
+        return;
+    }
+
+    // Aktuellen Frame basierend auf Video-Zeit finden
+    const videoTime = video.currentTime;
+    let frameIdx = 0;
+    for (let i = 0; i < trackingData.frames.length; i++) {
+        if (trackingData.frames[i].timestamp <= videoTime) {
+            frameIdx = i;
+        } else {
+            break;
+        }
+    }
+
+    const frame = trackingData.frames[frameIdx];
+    if (!frame || !frame.detections) return;
+
+    // Track team assignments
+    const teamAssignments = trackingData.track_team_assignments || {};
+
+    for (const det of frame.detections) {
+        if (!det.in_field) continue;
+
+        const [x1, y1, x2, y2] = det.bbox;
+        const width = x2 - x1;
+        const height = y2 - y1;
+
+        // Team-Farbe bestimmen
+        let team = det.team || 'unknown';
+        if (det.track_id && teamAssignments[det.track_id]) {
+            team = teamAssignments[det.track_id].team || team;
+        }
+
+        const color = getTeamColor(team);
+
+        // Bounding Box zeichnen
+        videoCtx.strokeStyle = color;
+        videoCtx.lineWidth = 3;
+        videoCtx.strokeRect(x1, y1, width, height);
+
+        // Label-Hintergrund
+        const label = det.track_id !== null && det.track_id !== undefined ? `#${det.track_id}` : '';
+        const jerseyNum = det.jersey_number ? ` (${det.jersey_number})` : '';
+        const text = label + jerseyNum;
+
+        if (text) {
+            videoCtx.font = 'bold 14px sans-serif';
+            const textWidth = videoCtx.measureText(text).width;
+
+            videoCtx.fillStyle = color;
+            videoCtx.fillRect(x1, y1 - 20, textWidth + 8, 20);
+
+            videoCtx.fillStyle = 'white';
+            videoCtx.fillText(text, x1 + 4, y1 - 5);
+        }
+
+        // Punkt am Fuss (wie im Tracking)
+        const footX = (x1 + x2) / 2;
+        const footY = y2;
+        videoCtx.beginPath();
+        videoCtx.arc(footX, footY, 5, 0, Math.PI * 2);
+        videoCtx.fillStyle = color;
+        videoCtx.fill();
+        videoCtx.strokeStyle = 'white';
+        videoCtx.lineWidth = 2;
+        videoCtx.stroke();
+    }
+}
+
+function drawPositions(frame) {
+    // Overlay leeren
+    playersOverlay.innerHTML = '';
+
+    if (!frame) {
+        log('No frame data');
+        return;
+    }
+
+    // Referees werden NICHT auf der Karte angezeigt (nur im Video-Overlay)
+    const allPositions = [
+        ...frame.players.map(p => ({...p, type: 'player'})),
+        // ...frame.referees.map(p => ({...p, type: 'referee'})),  // Ausgeblendet
+        ...frame.goalkeepers.map(p => ({...p, type: 'goalkeeper'})),
+        ...frame.unknown.map(p => ({...p, type: 'unknown'}))
+    ];
+
+    log(`Frame ${frame.frame_idx}: ${allPositions.length} positions (players: ${frame.players.length}, refs: ${frame.referees.length}, goalies: ${frame.goalkeepers.length}, unknown: ${frame.unknown.length})`);
+
+    // Trails zeichnen
+    if (trailLength > 0) {
+        for (const pos of allPositions) {
+            if (pos.track_id === null || pos.track_id === undefined) continue;
+
+            const history = positionHistory[pos.track_id] || [];
+            if (history.length >= 2) {
+                const pathPoints = history.map(h => `${h.x},${FIELD_WIDTH - h.y}`).join(' ');
+                const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+                polyline.setAttribute('points', pathPoints);
+                polyline.setAttribute('fill', 'none');
+                polyline.setAttribute('stroke', getTeamColor(pos.team, 0.4));
+                polyline.setAttribute('stroke-width', '0.3');
+                polyline.setAttribute('stroke-linecap', 'round');
+                polyline.setAttribute('stroke-linejoin', 'round');
+                playersOverlay.appendChild(polyline);
+            }
+        }
+    }
+
+    // Spieler zeichnen
+    for (const pos of allPositions) {
+        // SVG koordinaten: x = 0-40, y = 0-20 (Y ist invertiert im SVG)
+        const svgX = pos.x;
+        const svgY = FIELD_WIDTH - pos.y;  // Y invertieren
+
+        // Validierung
+        if (svgX < -1 || svgX > FIELD_LENGTH + 1 || svgY < -1 || svgY > FIELD_WIDTH + 1) {
+            log(`Skip out-of-bounds: track_id=${pos.track_id} x=${pos.x.toFixed(1)} y=${pos.y.toFixed(1)}`);
+            continue;
+        }
+
+        const color = getTeamColor(pos.team);
+        let radius = 0.6;  // Standard-Radius in Metern
+
+        if (pos.type === 'referee') radius = 0.4;
+        if (pos.type === 'goalkeeper') radius = 0.7;
+        if (pos.type === 'unknown') radius = 0.3;
+
+        // Kreis
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', svgX);
+        circle.setAttribute('cy', svgY);
+        circle.setAttribute('r', radius);
+        circle.setAttribute('fill', color);
+        circle.setAttribute('stroke', 'white');
+        circle.setAttribute('stroke-width', '0.1');
+        playersOverlay.appendChild(circle);
+
+        // Rückennummer
+        if (pos.jersey_number) {
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('x', svgX);
+            text.setAttribute('y', svgY + 0.15);
+            text.setAttribute('text-anchor', 'middle');
+            text.setAttribute('font-size', '0.5');
+            text.setAttribute('font-weight', 'bold');
+            text.setAttribute('fill', 'white');
+            text.textContent = pos.jersey_number;
+            playersOverlay.appendChild(text);
+        }
+    }
+}
+
+function getTeamColor(team, alpha = 1) {
+    let color;
+    if (team === 'team1') {
+        color = teamConfig.team1?.displayColor || '#3B82F6';
+    } else if (team === 'team2') {
+        color = teamConfig.team2?.displayColor || '#FFFFFF';
+    } else if (team === 'referee') {
+        color = teamConfig.referee?.displayColor || '#EC4899';
+    } else {
+        color = '#6B7280';  // Grau für unknown
+    }
+
+    if (alpha < 1 && color.startsWith('#')) {
+        // Hex zu rgba
+        const r = parseInt(color.slice(1, 3), 16);
+        const g = parseInt(color.slice(3, 5), 16);
+        const b = parseInt(color.slice(5, 7), 16);
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+    return color;
+}
+
+function updateFrame() {
+    if (!positionsData || positionsData.frames.length === 0) {
+        log('No positions data');
+        return;
+    }
+
+    const videoTime = video.currentTime;
+
+    // Frame finden
+    let frameIdx = 0;
+    for (let i = 0; i < positionsData.frames.length; i++) {
+        if (positionsData.frames[i].timestamp <= videoTime) {
+            frameIdx = i;
+        } else {
+            break;
+        }
+    }
+
+    currentFrameIndex = frameIdx;
+    const frame = positionsData.frames[frameIdx];
+
+    // Position History aktualisieren
+    const allPositions = [...(frame.players || []), ...(frame.referees || []), ...(frame.goalkeepers || [])];
+    for (const pos of allPositions) {
+        if (pos.track_id === null || pos.track_id === undefined) continue;
+
+        if (!positionHistory[pos.track_id]) {
+            positionHistory[pos.track_id] = [];
+        }
+
+        const history = positionHistory[pos.track_id];
+        if (history.length === 0 ||
+            history[history.length - 1].x !== pos.x ||
+            history[history.length - 1].y !== pos.y) {
+            history.push({ x: pos.x, y: pos.y, team: pos.team });
+
+            while (history.length > trailLength) {
+                history.shift();
+            }
+        }
+    }
+
+    drawPositions(frame);
+    drawVideoOverlay();
+    frameInfoEl.textContent = `Frame: ${frameIdx + 1}/${positionsData.frames.length}`;
+}
+
+function formatTime(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toFixed(1).padStart(4, '0')}`;
+}
+
+function updateTimeDisplay() {
+    const current = video.currentTime;
+    const duration = video.duration || 0;
+
+    currentTimeEl.textContent = formatTime(current);
+    durationEl.textContent = formatTime(duration);
+    videoTimeEl.textContent = formatTime(current);
+
+    const percent = duration > 0 ? (current / duration) * 100 : 0;
+    timelineProgress.style.width = `${percent}%`;
+
+    updateFrame();
+    drawVideoOverlay();  // Immer Video-Overlay aktualisieren
+}
+
+// Event Listeners
+video.addEventListener('timeupdate', updateTimeDisplay);
+video.addEventListener('loadedmetadata', () => {
+    log(`Video loaded: ${video.duration.toFixed(1)}s`);
+    updateTimeDisplay();
+    setupOverlay();
+    setupVideoOverlay();
+});
+video.addEventListener('error', (e) => {
+    log(`Video error: ${video.error?.message || 'unknown'}`);
+});
+
+document.getElementById('showVideoOverlay').addEventListener('change', (e) => {
+    showVideoOverlay = e.target.checked;
+    drawVideoOverlay();
+});
+
+document.getElementById('showFieldGrid').addEventListener('change', (e) => {
+    showFieldGrid = e.target.checked;
+    drawVideoOverlay();
+    if (showFieldGrid && positionsData && !positionsData.inverse_homography) {
+        log('WARNING: Keine inverse Homography verfügbar - Grid kann nicht gezeichnet werden');
+    }
+});
+
+playPauseBtn.addEventListener('click', () => {
+    if (video.paused) {
+        video.play();
+        playPauseBtn.textContent = 'Pause';
+    } else {
+        video.pause();
+        playPauseBtn.textContent = 'Play';
+    }
+});
+
+timeline.addEventListener('click', (e) => {
+    const rect = timeline.getBoundingClientRect();
+    const percent = (e.clientX - rect.left) / rect.width;
+    video.currentTime = percent * video.duration;
+    positionHistory = {};
+});
+
+document.querySelectorAll('.speed-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        video.playbackRate = parseFloat(btn.dataset.speed);
+    });
+});
+
+trailLengthInput.addEventListener('input', (e) => {
+    trailLength = parseInt(e.target.value);
+    trailValueEl.textContent = trailLength;
+    positionHistory = {};
+    updateFrame();
+});
+
+document.getElementById('showDebug').addEventListener('change', (e) => {
+    showDebug = e.target.checked;
+    debugPanel.classList.toggle('hidden', !showDebug);
+    if (showDebug && positionsData) {
+        log(`Positions loaded: ${positionsData.frames.length} frames`);
+    }
+});
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === ' ' || e.key === 'k') {
+        e.preventDefault();
+        playPauseBtn.click();
+    } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        video.currentTime = Math.max(0, video.currentTime - 1);
+    } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        video.currentTime = Math.min(video.duration, video.currentTime + 1);
+    }
+});
+
+window.addEventListener('resize', () => {
+    setupOverlay();
+    updateFrame();
+});
+
+// Load positions data
+async function loadPositions() {
+    try {
+        log('Loading positions...');
+        // Kalibrierungs-ID als Query-Parameter anhängen falls vorhanden
+        let positionsUrl = `/analysis/api/videos/${videoId}/snippets/${snippetId}/positions`;
+        if (calibrationId) {
+            positionsUrl += `?calibration_id=${calibrationId}`;
+            log(`Using calibration: ${calibrationId}`);
+        }
+        const response = await fetch(positionsUrl);
+        const data = await response.json();
+
+        if (data.error) {
+            log(`Positions error: ${data.error}`);
+            frameInfoEl.textContent = 'Fehler: ' + data.error;
+            return;
+        }
+
+        positionsData = data;
+        log(`Loaded ${positionsData.frames.length} position frames`);
+
+        // Kalibrierungs-Info anzeigen
+        if (positionsData.calibration_used) {
+            const cal = positionsData.calibration_used;
+            log(`Calibration: "${cal.name}" (id=${cal.id})`);
+            log(`  k1=${cal.k1}, focal=${cal.focal}, center=[${cal.center}]`);
+        }
+
+        // Debug-Statistiken anzeigen
+        if (positionsData.debug_stats) {
+            const s = positionsData.debug_stats;
+            log(`=== POSITION STATS ===`);
+            log(`Total detections: ${s.total_detections}`);
+            log(`Skipped (not in field): ${s.skipped_not_in_field}`);
+            log(`Skipped (transform error): ${s.skipped_transform_error}`);
+            log(`Skipped (out of bounds): ${s.skipped_out_of_bounds}`);
+            log(`Valid positions: ${s.valid_positions}`);
+
+            if (s.valid_positions === 0 && s.total_detections > 0) {
+                log(`WARNING: Keine gültigen Positionen! Homography wahrscheinlich falsch.`);
+            }
+        }
+
+        // Debug: erste paar Frames ausgeben
+        if (positionsData.frames.length > 0) {
+            const f = positionsData.frames[0];
+            log(`First frame: players=${f.players?.length || 0}, refs=${f.referees?.length || 0}, goalies=${f.goalkeepers?.length || 0}, unknown=${f.unknown?.length || 0}`);
+
+            // Prüfen ob Positionen im gültigen Bereich sind
+            const allPos = [...(f.players || []), ...(f.referees || []), ...(f.goalkeepers || []), ...(f.unknown || [])];
+            for (const p of allPos.slice(0, 5)) {
+                log(`  track_id=${p.track_id} x=${p.x?.toFixed(2)} y=${p.y?.toFixed(2)} team=${p.team}`);
+            }
+
+            // Statistik: wieviele Positionen sind im Spielfeld?
+            let inFieldCount = 0;
+            let outOfBoundsCount = 0;
+            for (const p of allPos) {
+                if (p.x >= 0 && p.x <= 40 && p.y >= 0 && p.y <= 20) {
+                    inFieldCount++;
+                } else {
+                    outOfBoundsCount++;
+                }
+            }
+            log(`Stats: ${inFieldCount} in field, ${outOfBoundsCount} out of bounds`);
+        }
+
+        updateFrame();
+    } catch (e) {
+        log(`Error loading positions: ${e.message}`);
+        frameInfoEl.textContent = 'Fehler beim Laden';
+    }
+}
+
+// Load tracking data for video overlay
+async function loadTrackingData() {
+    try {
+        log('Loading tracking data...');
+        const response = await fetch(`/analysis/api/videos/${videoId}/snippets/${snippetId}/tracking`);
+        if (response.ok) {
+            trackingData = await response.json();
+            log(`Tracking data loaded: ${trackingData.frames?.length || 0} frames`);
+
+            if (trackingData.frames && trackingData.frames.length > 0) {
+                const f = trackingData.frames[0];
+                log(`First tracking frame: ${f.detections?.length || 0} detections`);
+                if (f.detections && f.detections.length > 0) {
+                    const d = f.detections[0];
+                    log(`  Sample: bbox=[${d.bbox?.map(v => v.toFixed(0)).join(',')}] track_id=${d.track_id}`);
+                }
+            }
+
+            // Sofort zeichnen falls Video bereits geladen
+            drawVideoOverlay();
+        } else {
+            log(`Tracking data error: ${response.status}`);
+        }
+    } catch (e) {
+        log(`Could not load tracking data: ${e.message}`);
+    }
+}
+
+// Initialize
+setupOverlay();
+loadPositions();
+loadTrackingData();
+</script>
+{% endblock %}

@@ -1,0 +1,1628 @@
+{% extends "base.html" %}
+
+{% block title %}Video-Analyse - {{ video.filename }}{% endblock %}
+
+{% block head %}
+<style>
+    .step-panel {
+        transition: all 0.3s ease;
+    }
+    .step-panel.collapsed {
+        max-height: 60px;
+        overflow: hidden;
+    }
+    .step-panel.active {
+        border-color: #3B82F6;
+        background: #EFF6FF;
+    }
+    .step-panel.completed {
+        border-color: #10B981;
+        background: #ECFDF5;
+    }
+    .step-indicator {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        flex-shrink: 0;
+    }
+    .step-indicator.pending { background: #E5E7EB; color: #6B7280; }
+    .step-indicator.active { background: #3B82F6; color: white; }
+    .step-indicator.completed { background: #10B981; color: white; }
+
+    .snippet-marker {
+        position: absolute;
+        top: 0;
+        height: 100%;
+        opacity: 0.6;
+        cursor: pointer;
+    }
+    .snippet-marker:hover {
+        opacity: 0.8;
+    }
+    .timeline-container {
+        position: relative;
+        height: 40px;
+        background: #374151;
+        border-radius: 4px;
+        overflow: hidden;
+    }
+    .current-time-marker {
+        position: absolute;
+        top: 0;
+        width: 2px;
+        height: 100%;
+        background: white;
+        z-index: 10;
+    }
+    .video-container {
+        position: relative;
+        background: black;
+    }
+    #videoPlayer {
+        max-height: 50vh;
+    }
+    .model-card {
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .model-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    .model-card.selected {
+        border-color: #3B82F6;
+        background: #EFF6FF;
+    }
+    .snippet-card {
+        border-left: 4px solid;
+    }
+    .progress-bar {
+        height: 8px;
+        background: #E5E7EB;
+        border-radius: 4px;
+        overflow: hidden;
+    }
+    .progress-bar-fill {
+        height: 100%;
+        background: #3B82F6;
+        transition: width 0.3s;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-6" style="max-width: 1600px;">
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <a href="/analysis" class="text-blue-500 hover:underline text-sm">
+                &larr; Zurück zur Übersicht
+            </a>
+            <h1 class="text-2xl font-bold mt-2">Analyse: {{ video.filename }}</h1>
+        </div>
+    </div>
+
+    <!-- Workflow Steps -->
+    <div class="space-y-4">
+
+        <!-- Step 1: Snippets auswählen -->
+        <div id="step1-panel" class="step-panel border-2 rounded-lg p-4 active">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="toggleStep(1)">
+                <div id="step1-indicator" class="step-indicator active">1</div>
+                <h2 class="text-lg font-semibold flex-1">Snippets auswählen</h2>
+                <span id="step1-status" class="text-sm text-gray-500"></span>
+                <svg class="w-5 h-5 text-gray-400 step-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+            </div>
+
+            <div id="step1-content" class="mt-4">
+                <p class="text-gray-600 mb-4">
+                    Wähle 1-5 Snippets (je 5-30 Sekunden) aus dem Video. Tastenkürzel: [I] = In-Punkt, [O] = Out-Punkt, [Space] = Play/Pause
+                </p>
+
+                <!-- Video Player -->
+                <div class="bg-black rounded-lg overflow-hidden mb-4">
+                    <div class="video-container">
+                        <video id="videoPlayer"
+                               class="w-full"
+                               src="/api/videos/{{ video.id }}/stream"
+                               preload="metadata">
+                        </video>
+                    </div>
+
+                    <!-- Controls -->
+                    <div class="bg-gray-800 p-4">
+                        <!-- Timeline -->
+                        <div class="timeline-container mb-4" id="timeline">
+                            <div class="current-time-marker" id="timeMarker"></div>
+                        </div>
+
+                        <!-- Buttons -->
+                        <div class="flex items-center gap-4 flex-wrap">
+                            <button id="playPauseBtn" class="bg-white text-gray-900 px-4 py-2 rounded-lg font-medium">
+                                Play
+                            </button>
+                            <span id="currentTime" class="text-white font-mono">00:00.0</span>
+                            <span class="text-gray-400">/</span>
+                            <span id="duration" class="text-white font-mono">00:00.0</span>
+
+                            <div class="flex-1"></div>
+
+                            <button id="setInBtn" class="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm">
+                                In [I]
+                            </button>
+                            <button id="setOutBtn" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg text-sm">
+                                Out [O]
+                            </button>
+                            <span class="text-gray-400 text-sm">
+                                <span id="inPointDisplay" class="text-green-400 font-mono">--:--</span> -
+                                <span id="outPointDisplay" class="text-red-400 font-mono">--:--</span>
+                                (<span id="snippetDuration" class="text-white">--</span>)
+                            </span>
+                            <button id="addSnippetBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg" disabled>
+                                + Snippet
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Snippet-Liste -->
+                <div class="grid grid-cols-1 md:grid-cols-5 gap-3" id="snippetList">
+                    <!-- Snippets werden hier eingefügt -->
+                </div>
+                <div id="noSnippets" class="text-center text-gray-500 py-4 border-2 border-dashed rounded-lg">
+                    Noch keine Snippets definiert. Setze In- und Out-Punkte im Video.
+                </div>
+
+                <div class="mt-4 flex justify-end">
+                    <button id="step1NextBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg disabled:opacity-50" disabled>
+                        Weiter zu Schritt 2 &rarr;
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2: Snippets extrahieren -->
+        <div id="step2-panel" class="step-panel border-2 rounded-lg p-4 collapsed">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="toggleStep(2)">
+                <div id="step2-indicator" class="step-indicator pending">2</div>
+                <h2 class="text-lg font-semibold flex-1">Snippets extrahieren</h2>
+                <span id="step2-status" class="text-sm text-gray-500"></span>
+                <svg class="w-5 h-5 text-gray-400 step-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+            </div>
+
+            <div id="step2-content" class="mt-4">
+                <p class="text-gray-600 mb-4">
+                    Die ausgewählten Snippets werden mit ffmpeg aus dem Video extrahiert.
+                </p>
+
+                <div id="extractionList" class="space-y-3">
+                    <!-- Extraction status wird hier eingefügt -->
+                </div>
+
+                <div class="mt-4 flex justify-between">
+                    <button onclick="goToStep(1)" class="text-gray-600 hover:text-gray-800 px-4 py-2">
+                        &larr; Zurück
+                    </button>
+                    <button id="extractAllBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg">
+                        Alle extrahieren
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 3: Teams konfigurieren -->
+        <div id="step3-panel" class="step-panel border-2 rounded-lg p-4 collapsed">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="toggleStep(3)">
+                <div id="step3-indicator" class="step-indicator pending">3</div>
+                <h2 class="text-lg font-semibold flex-1">Teams konfigurieren</h2>
+                <span id="step3-status" class="text-sm text-gray-500"></span>
+                <svg class="w-5 h-5 text-gray-400 step-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+            </div>
+
+            <div id="step3-content" class="mt-4">
+                <p class="text-gray-600 mb-4">
+                    Definiere die Trikotfarben der Teams und Schiedsrichter für die automatische Zuweisung.
+                </p>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <!-- Team 1 -->
+                    <div class="bg-white border-2 rounded-lg p-4">
+                        <div class="flex items-center gap-3 mb-3">
+                            <div id="team1ColorPreview" class="w-8 h-8 rounded-full border-2 border-gray-300" style="background: #3B82F6;"></div>
+                            <h3 class="font-semibold">Team 1</h3>
+                        </div>
+                        <label class="block text-sm text-gray-600 mb-1">Trikotfarbe beschreiben:</label>
+                        <input type="text" id="team1Color" value="blue shirt"
+                               class="w-full border rounded-lg px-3 py-2 text-sm"
+                               placeholder="z.B. blue shirt, red jersey">
+                        <label class="block text-sm text-gray-600 mt-3 mb-1">Anzeigefarbe:</label>
+                        <input type="color" id="team1DisplayColor" value="#3B82F6" class="w-full h-10 rounded cursor-pointer">
+                    </div>
+
+                    <!-- Team 2 -->
+                    <div class="bg-white border-2 rounded-lg p-4">
+                        <div class="flex items-center gap-3 mb-3">
+                            <div id="team2ColorPreview" class="w-8 h-8 rounded-full border-2 border-gray-300" style="background: #FFFFFF;"></div>
+                            <h3 class="font-semibold">Team 2</h3>
+                        </div>
+                        <label class="block text-sm text-gray-600 mb-1">Trikotfarbe beschreiben:</label>
+                        <input type="text" id="team2Color" value="white shirt"
+                               class="w-full border rounded-lg px-3 py-2 text-sm"
+                               placeholder="z.B. white shirt, yellow jersey">
+                        <label class="block text-sm text-gray-600 mt-3 mb-1">Anzeigefarbe:</label>
+                        <input type="color" id="team2DisplayColor" value="#FFFFFF" class="w-full h-10 rounded cursor-pointer border">
+                    </div>
+
+                    <!-- Referees -->
+                    <div class="bg-white border-2 rounded-lg p-4">
+                        <div class="flex items-center gap-3 mb-3">
+                            <div id="refereeColorPreview" class="w-8 h-8 rounded-full border-2 border-gray-300" style="background: #EC4899;"></div>
+                            <h3 class="font-semibold">Schiedsrichter</h3>
+                        </div>
+                        <label class="block text-sm text-gray-600 mb-1">Trikotfarbe beschreiben:</label>
+                        <input type="text" id="refereeColor" value="pink shirt"
+                               class="w-full border rounded-lg px-3 py-2 text-sm"
+                               placeholder="z.B. pink shirt, black jersey">
+                        <label class="block text-sm text-gray-600 mt-3 mb-1">Anzeigefarbe:</label>
+                        <input type="color" id="refereeDisplayColor" value="#EC4899" class="w-full h-10 rounded cursor-pointer">
+                    </div>
+                </div>
+
+                <!-- Spielfeld-Boundary -->
+                <div class="mt-6">
+                    <h3 class="font-semibold mb-3">Spielfeld-Bereich definieren</h3>
+                    <p class="text-gray-600 text-sm mb-3">
+                        Zeichne ein Polygon um das Spielfeld. Nur Spieler innerhalb dieses Bereichs werden getrackt.
+                    </p>
+                    <div class="bg-black rounded-lg overflow-hidden">
+                        <div class="relative" id="boundaryContainer">
+                            <canvas id="boundaryCanvas" class="max-w-full cursor-crosshair"></canvas>
+                            <img id="boundaryImage" class="hidden" crossorigin="anonymous">
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-4 mt-3">
+                        <button id="loadBoundaryFrameBtn" class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm">
+                            Frame laden
+                        </button>
+                        <button id="clearBoundaryBtn" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm">
+                            Polygon löschen
+                        </button>
+                        <button id="closeBoundaryBtn" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm" disabled>
+                            Polygon schliessen
+                        </button>
+                        <span id="boundaryStatus" class="text-sm text-gray-500 ml-4">Klicke auf das Bild um Punkte zu setzen</span>
+                    </div>
+                </div>
+
+                <div class="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <p class="text-sm text-yellow-800">
+                        <strong>Hinweis:</strong> Torhüter werden automatisch erkannt, müssen aber manuell einem Team zugewiesen werden (im Review-Schritt).
+                    </p>
+                </div>
+
+                <div class="mt-4 flex justify-between">
+                    <button onclick="goToStep(2)" class="text-gray-600 hover:text-gray-800 px-4 py-2">
+                        &larr; Zurück
+                    </button>
+                    <button id="step3NextBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg">
+                        Weiter zu Schritt 4 &rarr;
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 4: Modell auswählen -->
+        <div id="step4-panel" class="step-panel border-2 rounded-lg p-4 collapsed">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="toggleStep(4)">
+                <div id="step4-indicator" class="step-indicator pending">4</div>
+                <h2 class="text-lg font-semibold flex-1">Modell auswählen</h2>
+                <span id="step4-status" class="text-sm text-gray-500"></span>
+                <svg class="w-5 h-5 text-gray-400 step-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+            </div>
+
+            <div id="step4-content" class="mt-4">
+                <p class="text-gray-600 mb-4">
+                    Wähle das YOLO-Modell für das Tracking. Eigene trainierte Modelle werden bevorzugt angezeigt.
+                </p>
+
+                <div id="modelList" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <!-- Modelle werden hier eingefügt -->
+                </div>
+
+                <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Confidence Threshold</label>
+                        <div class="flex items-center gap-4">
+                            <input type="range" id="confThreshold" min="0.1" max="0.9" step="0.05" value="0.3" class="flex-1">
+                            <span id="confValue" class="font-mono text-gray-700 w-12">0.30</span>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-1">Höher = weniger Detektionen, aber genauer.</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Tracking FPS</label>
+                        <div class="flex items-center gap-2">
+                            <input type="number" id="trackingFps" min="1" max="30" step="1" value="2" class="w-20 border rounded px-2 py-1">
+                            <span class="text-sm text-gray-600">fps</span>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-1">2-5 fps reicht meist. Weniger = schneller.</p>
+                    </div>
+                </div>
+
+                <!-- Erweiterte Parameter -->
+                <div class="mt-4 border-t pt-4">
+                    <button type="button" id="toggleAdvancedParams" class="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1">
+                        <svg class="w-4 h-4 transition-transform" id="advancedParamsChevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                        </svg>
+                        Erweiterte Parameter
+                    </button>
+                    <div id="advancedParams" class="hidden mt-4 space-y-4 bg-gray-50 rounded-lg p-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Team-Zuweisung Intervall</label>
+                                <div class="flex items-center gap-2">
+                                    <input type="number" id="teamAssignInterval" min="1" max="60" value="10" class="w-20 border rounded px-2 py-1">
+                                    <span class="text-sm text-gray-600">Sekunden</span>
+                                </div>
+                                <p class="text-xs text-gray-500 mt-1">Wie oft CLIP Team-Farben prüft</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Rückennummer Intervall</label>
+                                <div class="flex items-center gap-2">
+                                    <input type="number" id="jerseyOcrInterval" min="1" max="60" value="5" class="w-20 border rounded px-2 py-1">
+                                    <span class="text-sm text-gray-600">Sekunden</span>
+                                </div>
+                                <p class="text-xs text-gray-500 mt-1">Wie oft OCR Rückennummern sucht</p>
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-4">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" id="enableTeamAssign" checked class="form-checkbox h-4 w-4 text-blue-600">
+                                <span class="text-sm">Team-Zuweisung</span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" id="enableJerseyOcr" class="form-checkbox h-4 w-4 text-blue-600">
+                                <span class="text-sm">Rückennummer-Erkennung (langsam)</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-4 flex justify-between">
+                    <button onclick="goToStep(3)" class="text-gray-600 hover:text-gray-800 px-4 py-2">
+                        &larr; Zurück
+                    </button>
+                    <button id="step4NextBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg disabled:opacity-50" disabled>
+                        Weiter zu Schritt 5 &rarr;
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 5: Tracking starten -->
+        <div id="step5-panel" class="step-panel border-2 rounded-lg p-4 collapsed">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="toggleStep(5)">
+                <div id="step5-indicator" class="step-indicator pending">5</div>
+                <h2 class="text-lg font-semibold flex-1">Tracking starten</h2>
+                <span id="step5-status" class="text-sm text-gray-500"></span>
+                <svg class="w-5 h-5 text-gray-400 step-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+            </div>
+
+            <div id="step5-content" class="mt-4">
+                <p class="text-gray-600 mb-4">
+                    YOLO-Tracking mit Team-Zuweisung und Rückennummer-Erkennung wird auf den extrahierten Snippets ausgeführt.
+                </p>
+
+                <div class="bg-gray-100 rounded-lg p-4 mb-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="font-medium">Modell:</span>
+                                <span id="selectedModelDisplay" class="font-mono text-blue-600 text-sm">-</span>
+                            </div>
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="font-medium">Confidence:</span>
+                                <span id="selectedConfDisplay" class="font-mono">-</span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="font-medium">Tracking FPS:</span>
+                                <span id="selectedFpsDisplay" class="font-mono">-</span>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2 mb-2">
+                                <div class="w-4 h-4 rounded" id="team1ColorBox"></div>
+                                <span class="text-sm" id="team1Label">Team 1</span>
+                            </div>
+                            <div class="flex items-center gap-2 mb-2">
+                                <div class="w-4 h-4 rounded" id="team2ColorBox"></div>
+                                <span class="text-sm" id="team2Label">Team 2</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <div class="w-4 h-4 rounded" id="refereeColorBox"></div>
+                                <span class="text-sm">Schiedsrichter</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="trackingList" class="space-y-3">
+                    <!-- Tracking status wird hier eingefügt -->
+                </div>
+
+                <div id="forceRetrackContainer" class="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg" style="display: none;">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" id="forceRetrackCheckbox" class="form-checkbox h-5 w-5 text-yellow-600">
+                        <span class="text-yellow-800 font-medium">Bereits getracktes neu tracken (mit neuem Modell)</span>
+                    </label>
+                </div>
+
+                <div class="mt-4 flex justify-between">
+                    <button onclick="goToStep(4)" class="text-gray-600 hover:text-gray-800 px-4 py-2">
+                        &larr; Zurück
+                    </button>
+                    <button id="trackAllBtn" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg">
+                        Tracking starten
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 6: Review -->
+        <div id="step6-panel" class="step-panel border-2 rounded-lg p-4 collapsed">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="toggleStep(6)">
+                <div id="step6-indicator" class="step-indicator pending">6</div>
+                <h2 class="text-lg font-semibold flex-1">Review</h2>
+                <span id="step6-status" class="text-sm text-gray-500"></span>
+                <svg class="w-5 h-5 text-gray-400 step-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+            </div>
+
+            <div id="step6-content" class="mt-4">
+                <p class="text-gray-600 mb-4">
+                    Prüfe die Tracking-Ergebnisse. Du kannst Torhüter manuell einem Team zuweisen.
+                </p>
+
+                <div id="reviewList" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <!-- Review cards werden hier eingefügt -->
+                </div>
+
+                <div class="mt-4 flex justify-between">
+                    <button onclick="goToStep(5)" class="text-gray-600 hover:text-gray-800 px-4 py-2">
+                        &larr; Zurück
+                    </button>
+                    <button id="step6NextBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg disabled:opacity-50" disabled>
+                        Weiter zu Schritt 7 &rarr;
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 7: Positioning / Taktische Ansicht -->
+        <div id="step7-panel" class="step-panel border-2 rounded-lg p-4 collapsed">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="toggleStep(7)">
+                <div id="step7-indicator" class="step-indicator pending">7</div>
+                <h2 class="text-lg font-semibold flex-1">Positioning</h2>
+                <span id="step7-status" class="text-sm text-gray-500"></span>
+                <svg class="w-5 h-5 text-gray-400 step-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+            </div>
+
+            <div id="step7-content" class="mt-4">
+                <p class="text-gray-600 mb-4">
+                    Spielfeld-Projektion: Die Pixel-Koordinaten werden über die Kalibrierung (Homography + Fisheye-Korrektur) in Meter-Koordinaten umgerechnet.
+                </p>
+
+                <!-- Kalibrierungs-Auswahl -->
+                <div class="mb-6 p-4 bg-gray-50 rounded-lg border">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Kalibrierung auswählen:</label>
+                    <select id="calibrationSelect" class="w-full md:w-1/2 border rounded px-3 py-2" onchange="onCalibrationChange()">
+                        {% if all_calibrations %}
+                            {% for cal in all_calibrations %}
+                            <option value="{{ cal.id }}" {% if cal.is_active %}selected{% endif %}>
+                                {{ cal.name if cal.name else 'Kalibrierung ' ~ (cal.id | string)[:8] }}
+                                {% if cal.is_active %} (aktiv){% endif %}
+                                - {{ cal.created_at.strftime('%d.%m.%Y %H:%M') if cal.created_at else 'unbekannt' }}
+                            </option>
+                            {% endfor %}
+                        {% else %}
+                            <option value="">Keine Kalibrierung verfügbar</option>
+                        {% endif %}
+                    </select>
+                    <p class="text-xs text-gray-500 mt-1">Die gewählte Kalibrierung wird für die Spielfeld-Projektion verwendet.</p>
+                </div>
+
+                <div id="tacticalList" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <!-- Tactical view cards werden hier eingefügt -->
+                </div>
+
+                <div class="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <h3 class="font-semibold text-blue-800 mb-2">Taktische Ansicht Features:</h3>
+                    <ul class="text-sm text-blue-700 list-disc list-inside space-y-1">
+                        <li>Synchronisiertes Video mit 2D-Spielfeld</li>
+                        <li>Team-Farben aus Schritt 3</li>
+                        <li>Bewegungs-Trails für jeden Spieler</li>
+                        <li>Playback-Geschwindigkeit (0.25x - 2x)</li>
+                        <li>Tastenkürzel: Space = Play/Pause, Pfeiltasten = Vor/Zurück</li>
+                    </ul>
+                </div>
+
+                <div class="mt-4 flex justify-between">
+                    <button onclick="goToStep(6)" class="text-gray-600 hover:text-gray-800 px-4 py-2">
+                        &larr; Zurück
+                    </button>
+                    <a href="/analysis" class="bg-gray-800 hover:bg-gray-900 text-white px-6 py-2 rounded-lg">
+                        Fertig
+                    </a>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const videoId = "{{ video.id }}";
+const videoDuration = {{ video.duration or 0 }};
+
+let snippets = {{ snippets | tojson | safe }};
+let inPoint = null;
+let outPoint = null;
+let currentStep = 1;
+let selectedModel = null;
+let confThreshold = 0.3;
+let trackingFps = 2;
+let teamAssignInterval = 10;  // Sekunden
+let jerseyOcrInterval = 5;    // Sekunden
+let enableTeamAssign = true;
+let enableJerseyOcr = false;
+
+// Verfügbare Modelle (wird vom Server geladen)
+let availableModels = [];
+
+const video = document.getElementById('videoPlayer');
+const timeline = document.getElementById('timeline');
+const timeMarker = document.getElementById('timeMarker');
+const playPauseBtn = document.getElementById('playPauseBtn');
+const currentTimeEl = document.getElementById('currentTime');
+const durationEl = document.getElementById('duration');
+const setInBtn = document.getElementById('setInBtn');
+const setOutBtn = document.getElementById('setOutBtn');
+const addSnippetBtn = document.getElementById('addSnippetBtn');
+const inPointDisplay = document.getElementById('inPointDisplay');
+const outPointDisplay = document.getElementById('outPointDisplay');
+const snippetDurationEl = document.getElementById('snippetDuration');
+const snippetList = document.getElementById('snippetList');
+const noSnippets = document.getElementById('noSnippets');
+const confThresholdInput = document.getElementById('confThreshold');
+const confValueDisplay = document.getElementById('confValue');
+
+// Farben für Snippets
+const snippetColors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
+
+// === Step Navigation ===
+
+function toggleStep(step) {
+    // Erlaube Klick auf collapsed Steps
+    // Besonders wichtig: direkter Sprung zu Review wenn alles getrackt
+    goToStep(step);
+}
+
+function goToStep(step) {
+    // Nur erlauben wenn Voraussetzungen erfüllt
+    if (step > 1 && snippets.length === 0) return;
+    if (step > 2 && !snippets.every(s => s.extracted)) return;
+    // Step 3 = Teams -> keine Voraussetzung außer extracted
+    // Step 4/5 kann übersprungen werden wenn bereits getrackt
+    if (step > 4 && !selectedModel && !snippets.every(s => s.tracked)) return;
+    // Step 6 (Review) und Step 7 (Positioning) - erlaubt wenn alle getrackt
+    // (kein Block hier - wird unten geprüft)
+
+    currentStep = step;
+
+    // Alle Panels aktualisieren (7 steps now)
+    for (let i = 1; i <= 7; i++) {
+        const panel = document.getElementById(`step${i}-panel`);
+        const indicator = document.getElementById(`step${i}-indicator`);
+
+        panel.classList.remove('active', 'collapsed', 'completed');
+        indicator.classList.remove('active', 'pending', 'completed');
+
+        if (i < step) {
+            panel.classList.add('collapsed', 'completed');
+            indicator.classList.add('completed');
+            indicator.innerHTML = '&#10003;';
+        } else if (i === step) {
+            panel.classList.add('active');
+            indicator.classList.add('active');
+            indicator.textContent = i;
+        } else {
+            panel.classList.add('collapsed');
+            indicator.classList.add('pending');
+            indicator.textContent = i;
+        }
+    }
+
+    // Step-spezifische Aktionen
+    if (step === 2) renderExtractionList();
+    if (step === 3) updateTeamColorPreviews();
+    if (step === 4) loadModels();
+    if (step === 5) renderTrackingList();
+    if (step === 6) renderReviewList();
+    if (step === 7) renderTacticalList();
+}
+
+function updateStepStatus() {
+    // Step 1 Status
+    const step1Status = document.getElementById('step1-status');
+    step1Status.textContent = snippets.length > 0 ? `${snippets.length} Snippet(s)` : '';
+    document.getElementById('step1NextBtn').disabled = snippets.length === 0;
+
+    // Step 2 Status
+    const extracted = snippets.filter(s => s.extracted).length;
+    document.getElementById('step2-status').textContent = extracted > 0 ? `${extracted}/${snippets.length} extrahiert` : '';
+
+    // Step 3 Status (Teams) - always configured
+    document.getElementById('step3-status').textContent = 'Konfiguriert';
+
+    // Step 4 Status (Model)
+    const modelName = selectedModel ? selectedModel.split('/').pop() : '';
+    document.getElementById('step4-status').textContent = selectedModel ? modelName : '';
+
+    // Step 5 Status (Tracking)
+    const tracked = snippets.filter(s => s.tracked).length;
+    document.getElementById('step5-status').textContent = tracked > 0 ? `${tracked}/${snippets.length} getrackt` : '';
+
+    // Step 6 Status (Review)
+    const allTracked = tracked === snippets.length && snippets.length > 0;
+    document.getElementById('step6-status').textContent = allTracked ? 'Bereit' : '';
+    document.getElementById('step6NextBtn').disabled = !allTracked;
+
+    // Step 7 Status (Positioning)
+    document.getElementById('step7-status').textContent = allTracked ? 'Bereit' : '';
+}
+
+// === Team Colors ===
+let teamConfig = {
+    team1: { color: 'blue shirt', displayColor: '#3B82F6' },
+    team2: { color: 'white shirt', displayColor: '#FFFFFF' },
+    referee: { color: 'pink shirt', displayColor: '#EC4899' }
+};
+
+function updateTeamColorPreviews() {
+    // Sync display color previews
+    document.getElementById('team1ColorPreview').style.background = document.getElementById('team1DisplayColor').value;
+    document.getElementById('team2ColorPreview').style.background = document.getElementById('team2DisplayColor').value;
+    document.getElementById('refereeColorPreview').style.background = document.getElementById('refereeDisplayColor').value;
+}
+
+function getTeamConfig() {
+    return {
+        team1: {
+            color: document.getElementById('team1Color').value,
+            displayColor: document.getElementById('team1DisplayColor').value
+        },
+        team2: {
+            color: document.getElementById('team2Color').value,
+            displayColor: document.getElementById('team2DisplayColor').value
+        },
+        referee: {
+            color: document.getElementById('refereeColor').value,
+            displayColor: document.getElementById('refereeDisplayColor').value
+        }
+    };
+}
+
+// === Video Player ===
+
+function formatTime(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toFixed(1).padStart(4, '0')}`;
+}
+
+function updateTimeDisplay() {
+    const current = video.currentTime;
+    const duration = video.duration || videoDuration;
+    currentTimeEl.textContent = formatTime(current);
+    durationEl.textContent = formatTime(duration);
+
+    const percent = (current / duration) * 100;
+    timeMarker.style.left = `${percent}%`;
+}
+
+function updateInOutDisplay() {
+    inPointDisplay.textContent = inPoint !== null ? formatTime(inPoint) : '--:--';
+    outPointDisplay.textContent = outPoint !== null ? formatTime(outPoint) : '--:--';
+
+    if (inPoint !== null && outPoint !== null) {
+        const duration = outPoint - inPoint;
+        snippetDurationEl.textContent = `${duration.toFixed(1)}s`;
+        addSnippetBtn.disabled = duration < 5 || duration > 30 || snippets.length >= 5;
+    } else {
+        snippetDurationEl.textContent = '--';
+        addSnippetBtn.disabled = true;
+    }
+}
+
+function renderSnippetMarkers() {
+    timeline.querySelectorAll('.snippet-marker').forEach(el => el.remove());
+    const duration = video.duration || videoDuration;
+
+    snippets.forEach((snippet, index) => {
+        const startPercent = (snippet.start / duration) * 100;
+        const widthPercent = ((snippet.end - snippet.start) / duration) * 100;
+
+        const marker = document.createElement('div');
+        marker.className = 'snippet-marker';
+        marker.style.left = `${startPercent}%`;
+        marker.style.width = `${widthPercent}%`;
+        marker.style.backgroundColor = snippetColors[index % snippetColors.length];
+        marker.title = `Snippet ${index + 1}`;
+        marker.onclick = () => video.currentTime = snippet.start;
+        timeline.appendChild(marker);
+    });
+}
+
+function renderSnippetList() {
+    if (snippets.length === 0) {
+        snippetList.innerHTML = '';
+        noSnippets.style.display = 'block';
+    } else {
+        noSnippets.style.display = 'none';
+        snippetList.innerHTML = snippets.map((snippet, index) => `
+            <div class="snippet-card bg-white rounded-lg p-3 shadow" style="border-color: ${snippetColors[index % snippetColors.length]}">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="font-medium">Snippet ${index + 1}</span>
+                    <button onclick="removeSnippet(${index})" class="text-red-500 hover:text-red-700 text-lg">&times;</button>
+                </div>
+                <p class="text-sm text-gray-600">
+                    ${formatTime(snippet.start)} - ${formatTime(snippet.end)}
+                </p>
+                <p class="text-xs text-gray-500">
+                    ${(snippet.end - snippet.start).toFixed(1)}s
+                </p>
+            </div>
+        `).join('');
+    }
+
+    renderSnippetMarkers();
+    updateStepStatus();
+}
+
+function addSnippet() {
+    if (inPoint === null || outPoint === null) return;
+    if (snippets.length >= 5) return;
+
+    const duration = outPoint - inPoint;
+    if (duration < 5 || duration > 30) {
+        alert('Snippet muss zwischen 5 und 30 Sekunden lang sein');
+        return;
+    }
+
+    snippets.push({
+        start: inPoint,
+        end: outPoint,
+        extracted: false,
+        tracked: false
+    });
+
+    inPoint = null;
+    outPoint = null;
+    updateInOutDisplay();
+    renderSnippetList();
+    saveSnippets();
+}
+
+function removeSnippet(index) {
+    snippets.splice(index, 1);
+    renderSnippetList();
+    saveSnippets();
+}
+
+async function saveSnippets() {
+    try {
+        const response = await fetch(`/analysis/api/videos/${videoId}/snippets`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({snippets: snippets})
+        });
+        const data = await response.json();
+        if (!data.error) {
+            snippets = data.snippets;
+            renderSnippetList();
+        }
+    } catch (e) {
+        console.error('Speichern fehlgeschlagen:', e);
+    }
+}
+
+// === Step 2: Extraction ===
+
+function renderExtractionList() {
+    const list = document.getElementById('extractionList');
+    list.innerHTML = snippets.map((snippet, index) => `
+        <div class="flex items-center gap-4 p-3 bg-white rounded-lg shadow" id="extract-${index}">
+            <div class="w-8 h-8 rounded-full flex items-center justify-center font-bold text-white" style="background: ${snippetColors[index % snippetColors.length]}">
+                ${index + 1}
+            </div>
+            <div class="flex-1">
+                <p class="font-medium">Snippet ${index + 1}</p>
+                <p class="text-sm text-gray-500">${formatTime(snippet.start)} - ${formatTime(snippet.end)} (${(snippet.end - snippet.start).toFixed(1)}s)</p>
+            </div>
+            <div id="extract-status-${index}">
+                ${snippet.extracted ?
+                    '<span class="text-green-600 font-medium">&#10003; Extrahiert</span>' :
+                    '<span class="text-gray-400">Ausstehend</span>'
+                }
+            </div>
+        </div>
+    `).join('');
+}
+
+async function extractAll() {
+    const btn = document.getElementById('extractAllBtn');
+    btn.disabled = true;
+    btn.textContent = 'Extrahiere...';
+
+    for (let i = 0; i < snippets.length; i++) {
+        if (snippets[i].extracted) continue;
+
+        const statusEl = document.getElementById(`extract-status-${i}`);
+        statusEl.innerHTML = '<span class="text-blue-600">Extrahiere...</span>';
+
+        try {
+            const response = await fetch(`/analysis/api/videos/${videoId}/snippets/${snippets[i].id}/extract`, {
+                method: 'POST'
+            });
+            const data = await response.json();
+
+            if (data.error) {
+                statusEl.innerHTML = `<span class="text-red-600">Fehler: ${data.error}</span>`;
+            } else {
+                snippets[i].extracted = true;
+                snippets[i].clip_path = data.clip_path;
+                statusEl.innerHTML = '<span class="text-green-600 font-medium">&#10003; Extrahiert</span>';
+            }
+        } catch (e) {
+            statusEl.innerHTML = `<span class="text-red-600">Fehler: ${e.message}</span>`;
+        }
+    }
+
+    btn.disabled = false;
+    btn.textContent = 'Alle extrahieren';
+    updateStepStatus();
+
+    // Automatisch zu Schritt 3 (Teams) wenn alle extrahiert
+    if (snippets.every(s => s.extracted)) {
+        setTimeout(() => goToStep(3), 500);
+    }
+}
+
+// === Step 3: Model Selection ===
+
+async function loadModels() {
+    const list = document.getElementById('modelList');
+    list.innerHTML = '<p class="text-gray-500 col-span-3">Lade Modelle...</p>';
+
+    try {
+        const response = await fetch('/analysis/api/models');
+        const data = await response.json();
+        availableModels = data.models || [];
+
+        if (availableModels.length === 0) {
+            // Fallback zu Standard-Modellen
+            availableModels = [
+                {id: 'yolov8n.pt', name: 'YOLOv8 Nano', description: 'Schnellstes Modell, geringste Genauigkeit', type: 'pretrained'},
+                {id: 'yolov8s.pt', name: 'YOLOv8 Small', description: 'Gute Balance zwischen Geschwindigkeit und Genauigkeit', type: 'pretrained'},
+                {id: 'yolov8m.pt', name: 'YOLOv8 Medium', description: 'Höhere Genauigkeit, langsamer', type: 'pretrained'}
+            ];
+        }
+
+        renderModelList();
+    } catch (e) {
+        list.innerHTML = '<p class="text-red-500 col-span-3">Fehler beim Laden der Modelle</p>';
+    }
+}
+
+function renderModelList() {
+    const list = document.getElementById('modelList');
+    list.innerHTML = availableModels.map(model => `
+        <div class="model-card border-2 rounded-lg p-4 ${selectedModel === model.id ? 'selected' : ''}" onclick="selectModel('${model.id}')">
+            <div class="flex items-center gap-2 mb-2">
+                ${model.type === 'trained' ?
+                    '<span class="bg-green-100 text-green-800 text-xs px-2 py-1 rounded">Trainiert</span>' :
+                    '<span class="bg-gray-100 text-gray-800 text-xs px-2 py-1 rounded">Vortrainiert</span>'
+                }
+            </div>
+            <h3 class="font-semibold">${model.name}</h3>
+            <p class="text-sm text-gray-600 mt-1">${model.description || ''}</p>
+            ${model.map50 ? `<p class="text-xs text-gray-500 mt-2">mAP@50: ${(model.map50 * 100).toFixed(1)}%</p>` : ''}
+        </div>
+    `).join('');
+}
+
+function selectModel(modelId) {
+    selectedModel = modelId;
+    renderModelList();
+    document.getElementById('step4NextBtn').disabled = false;
+    updateStepStatus();
+}
+
+// === Step 4: Tracking ===
+
+let forceRetrack = false;
+
+function renderTrackingList() {
+    const modelName = selectedModel ? selectedModel.split('/').pop() : '-';
+    document.getElementById('selectedModelDisplay').textContent = modelName;
+    document.getElementById('selectedConfDisplay').textContent = confThreshold.toFixed(2);
+    document.getElementById('selectedFpsDisplay').textContent = `${trackingFps} fps`;
+
+    // Team colors in summary
+    const tc = getTeamConfig();
+    document.getElementById('team1ColorBox').style.background = tc.team1.displayColor;
+    document.getElementById('team1Label').textContent = `Team 1: ${tc.team1.color}`;
+    document.getElementById('team2ColorBox').style.background = tc.team2.displayColor;
+    document.getElementById('team2Label').textContent = `Team 2: ${tc.team2.color}`;
+    document.getElementById('refereeColorBox').style.background = tc.referee.displayColor;
+
+    const anyTracked = snippets.some(s => s.tracked);
+
+    const list = document.getElementById('trackingList');
+    list.innerHTML = snippets.map((snippet, index) => `
+        <div class="flex items-center gap-4 p-3 bg-white rounded-lg shadow" id="track-${index}">
+            <div class="w-8 h-8 rounded-full flex items-center justify-center font-bold text-white" style="background: ${snippetColors[index % snippetColors.length]}">
+                ${index + 1}
+            </div>
+            <div class="flex-1">
+                <p class="font-medium">Snippet ${index + 1}</p>
+                <p class="text-sm text-gray-500">${(snippet.end - snippet.start).toFixed(1)}s</p>
+                <div class="progress-bar mt-2" id="track-progress-${index}" style="display: none;">
+                    <div class="progress-bar-fill" id="track-progress-fill-${index}" style="width: 0%"></div>
+                </div>
+                <p class="text-xs text-gray-400 mt-1" id="track-detail-${index}"></p>
+            </div>
+            <div id="track-status-${index}">
+                ${snippet.tracked ?
+                    '<span class="text-green-600 font-medium">&#10003; Getrackt</span>' :
+                    '<span class="text-gray-400">Ausstehend</span>'
+                }
+            </div>
+        </div>
+    `).join('');
+
+    // Force Re-Track Checkbox anzeigen wenn bereits getrackt
+    const forceContainer = document.getElementById('forceRetrackContainer');
+    if (forceContainer) {
+        forceContainer.style.display = anyTracked ? 'block' : 'none';
+    }
+}
+
+let trackingInProgress = false;
+let progressPollers = {};
+
+async function pollProgress(index, snippetId) {
+    while (trackingInProgress && progressPollers[index]) {
+        try {
+            const response = await fetch(`/analysis/api/videos/${videoId}/snippets/${snippetId}/progress`);
+            const data = await response.json();
+
+            const progressBar = document.getElementById(`track-progress-${index}`);
+            const progressFill = document.getElementById(`track-progress-fill-${index}`);
+            const detailEl = document.getElementById(`track-detail-${index}`);
+
+            if (data.stage !== 'idle') {
+                progressBar.style.display = 'block';
+                progressFill.style.width = `${data.percent}%`;
+                detailEl.textContent = data.detail;
+            }
+
+            if (data.stage === 'done') {
+                progressPollers[index] = false;
+                break;
+            }
+        } catch (e) {
+            // ignore
+        }
+        await new Promise(r => setTimeout(r, 500));  // Poll alle 500ms
+    }
+}
+
+async function trackAll() {
+    const btn = document.getElementById('trackAllBtn');
+    btn.disabled = true;
+    btn.textContent = 'Tracking läuft...';
+    trackingInProgress = true;
+
+    for (let i = 0; i < snippets.length; i++) {
+        // Skip wenn bereits getrackt UND nicht force
+        if (snippets[i].tracked && !forceRetrack) continue;
+
+        const statusEl = document.getElementById(`track-status-${i}`);
+        const progressBar = document.getElementById(`track-progress-${i}`);
+        const progressFill = document.getElementById(`track-progress-fill-${i}`);
+        const detailEl = document.getElementById(`track-detail-${i}`);
+
+        statusEl.innerHTML = '<span class="text-blue-600">Tracke...</span>';
+        progressBar.style.display = 'block';
+        progressFill.style.width = '0%';
+        detailEl.textContent = 'Initialisiere...';
+
+        // Progress-Polling starten
+        progressPollers[i] = true;
+        pollProgress(i, snippets[i].id);
+
+        try {
+            const tc = getTeamConfig();
+            const response = await fetch(`/analysis/api/videos/${videoId}/snippets/${snippets[i].id}/track`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    model_path: selectedModel,
+                    conf_threshold: confThreshold,
+                    target_fps: trackingFps,
+                    team_config: tc,
+                    enable_team_assign: enableTeamAssign,
+                    team_assign_interval: teamAssignInterval,
+                    enable_jersey_ocr: enableJerseyOcr,
+                    jersey_ocr_interval: jerseyOcrInterval
+                })
+            });
+            const data = await response.json();
+
+            // Polling stoppen
+            progressPollers[i] = false;
+
+            if (data.error) {
+                statusEl.innerHTML = `<span class="text-red-600">Fehler: ${data.error}</span>`;
+                progressBar.style.display = 'none';
+            } else {
+                snippets[i].tracked = true;
+                progressFill.style.width = '100%';
+                detailEl.textContent = '';
+                statusEl.innerHTML = `<span class="text-green-600 font-medium">&#10003; ${data.in_field_count || 0} Detektionen</span>`;
+            }
+        } catch (e) {
+            progressPollers[i] = false;
+            statusEl.innerHTML = `<span class="text-red-600">Fehler: ${e.message}</span>`;
+            progressBar.style.display = 'none';
+        }
+    }
+
+    trackingInProgress = false;
+    btn.disabled = false;
+    btn.textContent = 'Tracking starten';
+    forceRetrack = false;
+    document.getElementById('forceRetrackCheckbox').checked = false;
+    updateStepStatus();
+
+    // Automatisch zu Schritt 6 (Review) wenn alle getrackt
+    if (snippets.every(s => s.tracked)) {
+        setTimeout(() => goToStep(6), 500);
+    }
+}
+
+// === Step 6: Review ===
+
+function renderReviewList() {
+    const list = document.getElementById('reviewList');
+    list.innerHTML = snippets.filter(s => s.tracked).map((snippet, index) => `
+        <a href="/analysis/video/${videoId}/review/${snippet.id}" class="block bg-white rounded-lg shadow overflow-hidden hover:shadow-lg transition-shadow">
+            <div class="h-2" style="background: ${snippetColors[index % snippetColors.length]}"></div>
+            <div class="p-4">
+                <h3 class="font-semibold">Snippet ${index + 1}</h3>
+                <p class="text-sm text-gray-600">${formatTime(snippet.start)} - ${formatTime(snippet.end)}</p>
+                <p class="text-xs text-gray-500 mt-2">${(snippet.end - snippet.start).toFixed(1)}s</p>
+                <div class="mt-3 text-blue-600 text-sm font-medium">
+                    Review öffnen &rarr;
+                </div>
+            </div>
+        </a>
+    `).join('');
+}
+
+// === Step 7: Tactical / Positioning ===
+
+let selectedCalibrationId = document.getElementById('calibrationSelect')?.value || null;
+
+function onCalibrationChange() {
+    selectedCalibrationId = document.getElementById('calibrationSelect').value;
+    console.log('Selected calibration:', selectedCalibrationId);
+    // Links aktualisieren
+    renderTacticalList();
+}
+
+function renderTacticalList() {
+    const list = document.getElementById('tacticalList');
+    const calParam = selectedCalibrationId ? `?calibration_id=${selectedCalibrationId}` : '';
+
+    list.innerHTML = snippets.filter(s => s.tracked).map((snippet, index) => `
+        <a href="/analysis/video/${videoId}/tactical/${snippet.id}${calParam}" class="block bg-white rounded-lg shadow overflow-hidden hover:shadow-lg transition-shadow">
+            <div class="h-2" style="background: ${snippetColors[index % snippetColors.length]}"></div>
+            <div class="p-4">
+                <h3 class="font-semibold">Snippet ${index + 1}</h3>
+                <p class="text-sm text-gray-600">${formatTime(snippet.start)} - ${formatTime(snippet.end)}</p>
+                <p class="text-xs text-gray-500 mt-2">${(snippet.end - snippet.start).toFixed(1)}s</p>
+                <div class="mt-3 flex items-center gap-2 text-green-600 text-sm font-medium">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
+                    </svg>
+                    Taktische Ansicht &rarr;
+                </div>
+            </div>
+        </a>
+    `).join('');
+}
+
+// === Event Listeners ===
+
+video.addEventListener('timeupdate', updateTimeDisplay);
+video.addEventListener('loadedmetadata', () => {
+    updateTimeDisplay();
+    renderSnippetMarkers();
+});
+
+playPauseBtn.addEventListener('click', () => {
+    if (video.paused) {
+        video.play();
+        playPauseBtn.textContent = 'Pause';
+    } else {
+        video.pause();
+        playPauseBtn.textContent = 'Play';
+    }
+});
+
+timeline.addEventListener('click', (e) => {
+    const rect = timeline.getBoundingClientRect();
+    const percent = (e.clientX - rect.left) / rect.width;
+    video.currentTime = percent * (video.duration || videoDuration);
+});
+
+setInBtn.addEventListener('click', () => {
+    inPoint = video.currentTime;
+    if (outPoint !== null && outPoint <= inPoint) outPoint = null;
+    updateInOutDisplay();
+});
+
+setOutBtn.addEventListener('click', () => {
+    outPoint = video.currentTime;
+    if (inPoint !== null && inPoint >= outPoint) inPoint = null;
+    updateInOutDisplay();
+});
+
+addSnippetBtn.addEventListener('click', addSnippet);
+
+document.getElementById('step1NextBtn').addEventListener('click', () => goToStep(2));
+document.getElementById('extractAllBtn').addEventListener('click', extractAll);
+document.getElementById('step3NextBtn').addEventListener('click', () => goToStep(4));
+document.getElementById('step4NextBtn').addEventListener('click', () => goToStep(5));
+document.getElementById('trackAllBtn').addEventListener('click', trackAll);
+document.getElementById('step6NextBtn').addEventListener('click', () => goToStep(7));
+
+document.getElementById('forceRetrackCheckbox').addEventListener('change', (e) => {
+    forceRetrack = e.target.checked;
+});
+
+// Team color preview updates
+['team1DisplayColor', 'team2DisplayColor', 'refereeDisplayColor'].forEach(id => {
+    document.getElementById(id).addEventListener('input', updateTeamColorPreviews);
+});
+
+confThresholdInput.addEventListener('input', (e) => {
+    confThreshold = parseFloat(e.target.value);
+    confValueDisplay.textContent = confThreshold.toFixed(2);
+});
+
+document.getElementById('trackingFps').addEventListener('change', (e) => {
+    trackingFps = parseInt(e.target.value) || 2;
+    if (trackingFps < 1) trackingFps = 1;
+    if (trackingFps > 30) trackingFps = 30;
+    e.target.value = trackingFps;
+});
+
+// Advanced params toggle
+document.getElementById('toggleAdvancedParams').addEventListener('click', () => {
+    const params = document.getElementById('advancedParams');
+    const chevron = document.getElementById('advancedParamsChevron');
+    params.classList.toggle('hidden');
+    chevron.style.transform = params.classList.contains('hidden') ? '' : 'rotate(90deg)';
+});
+
+document.getElementById('teamAssignInterval').addEventListener('change', (e) => {
+    teamAssignInterval = parseInt(e.target.value) || 10;
+});
+
+document.getElementById('jerseyOcrInterval').addEventListener('change', (e) => {
+    jerseyOcrInterval = parseInt(e.target.value) || 5;
+});
+
+document.getElementById('enableTeamAssign').addEventListener('change', (e) => {
+    enableTeamAssign = e.target.checked;
+});
+
+document.getElementById('enableJerseyOcr').addEventListener('change', (e) => {
+    enableJerseyOcr = e.target.checked;
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (currentStep !== 1) return;
+
+    if (e.key === ' ' || e.key === 'k') {
+        e.preventDefault();
+        playPauseBtn.click();
+    } else if (e.key === 'i' || e.key === 'I') {
+        e.preventDefault();
+        setInBtn.click();
+    } else if (e.key === 'o' || e.key === 'O') {
+        e.preventDefault();
+        setOutBtn.click();
+    } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        video.currentTime = Math.max(0, video.currentTime - 5);
+    } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        video.currentTime = Math.min(video.duration, video.currentTime + 5);
+    }
+});
+
+// === Boundary Polygon Editor ===
+const boundaryCanvas = document.getElementById('boundaryCanvas');
+const boundaryCtx = boundaryCanvas.getContext('2d');
+let boundaryPoints = [];
+let boundaryPolygonClosed = false;
+let boundaryFrameData = null;  // Gespeichertes Bild als ImageData
+let boundaryDragging = null;   // Index des Punktes der gezogen wird
+let boundaryHovering = null;   // Index des Punktes über dem die Maus ist
+let boundaryHoverLine = null;  // {index, position} für Linie-Hover
+
+const POINT_RADIUS = 8;
+const POINT_HIT_RADIUS = 12;
+const LINE_HIT_DISTANCE = 10;
+
+function loadBoundaryFrame() {
+    const timestamp = snippets.length > 0 ? snippets[0].start + 1 : 5;
+    const statusEl = document.getElementById('boundaryStatus');
+    statusEl.textContent = 'Lade Frame...';
+
+    const tempVideo = document.createElement('video');
+    tempVideo.src = `/api/videos/${videoId}/stream`;
+    tempVideo.crossOrigin = 'anonymous';
+    tempVideo.muted = true;
+    tempVideo.preload = 'auto';
+
+    tempVideo.addEventListener('loadedmetadata', () => {
+        tempVideo.currentTime = timestamp;
+    });
+
+    tempVideo.addEventListener('seeked', () => {
+        boundaryCanvas.width = tempVideo.videoWidth;
+        boundaryCanvas.height = tempVideo.videoHeight;
+        boundaryCtx.drawImage(tempVideo, 0, 0);
+
+        // Frame als ImageData speichern (kein Neuladen mehr nötig!)
+        boundaryFrameData = boundaryCtx.getImageData(0, 0, boundaryCanvas.width, boundaryCanvas.height);
+
+        statusEl.textContent = `Frame geladen (${tempVideo.videoWidth}x${tempVideo.videoHeight}). Klicke um Punkte zu setzen.`;
+        drawBoundary();
+    });
+
+    tempVideo.addEventListener('error', () => {
+        statusEl.textContent = 'Fehler beim Laden des Frames';
+    });
+
+    tempVideo.load();
+}
+
+function drawBoundary() {
+    if (!boundaryFrameData) return;
+
+    // Hintergrundbild wiederherstellen (kein Neuladen!)
+    boundaryCtx.putImageData(boundaryFrameData, 0, 0);
+
+    if (boundaryPoints.length === 0) return;
+
+    // Polygon füllen wenn geschlossen
+    if (boundaryPolygonClosed && boundaryPoints.length >= 3) {
+        boundaryCtx.beginPath();
+        boundaryCtx.moveTo(boundaryPoints[0].x, boundaryPoints[0].y);
+        for (let i = 1; i < boundaryPoints.length; i++) {
+            boundaryCtx.lineTo(boundaryPoints[i].x, boundaryPoints[i].y);
+        }
+        boundaryCtx.closePath();
+        boundaryCtx.fillStyle = 'rgba(139, 92, 246, 0.2)';
+        boundaryCtx.fill();
+    }
+
+    // Linien zeichnen
+    boundaryCtx.strokeStyle = '#8B5CF6';
+    boundaryCtx.lineWidth = 3;
+    boundaryCtx.beginPath();
+    boundaryCtx.moveTo(boundaryPoints[0].x, boundaryPoints[0].y);
+    for (let i = 1; i < boundaryPoints.length; i++) {
+        boundaryCtx.lineTo(boundaryPoints[i].x, boundaryPoints[i].y);
+    }
+    if (boundaryPolygonClosed) {
+        boundaryCtx.closePath();
+    }
+    boundaryCtx.stroke();
+
+    // Hover-Indikator auf Linie (für Punkt einfügen)
+    if (boundaryHoverLine !== null && !boundaryDragging) {
+        const {index, x, y} = boundaryHoverLine;
+        boundaryCtx.beginPath();
+        boundaryCtx.arc(x, y, 6, 0, Math.PI * 2);
+        boundaryCtx.fillStyle = 'rgba(16, 185, 129, 0.7)';
+        boundaryCtx.fill();
+        boundaryCtx.strokeStyle = 'white';
+        boundaryCtx.lineWidth = 2;
+        boundaryCtx.stroke();
+    }
+
+    // Punkte zeichnen
+    boundaryPoints.forEach((p, i) => {
+        const isHovered = boundaryHovering === i;
+        const isDragging = boundaryDragging === i;
+        const radius = (isHovered || isDragging) ? POINT_RADIUS + 3 : POINT_RADIUS;
+
+        boundaryCtx.beginPath();
+        boundaryCtx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+
+        if (i === 0) {
+            boundaryCtx.fillStyle = '#10B981';  // Grün für Startpunkt
+        } else if (isHovered || isDragging) {
+            boundaryCtx.fillStyle = '#F59E0B';  // Orange wenn hover/drag
+        } else {
+            boundaryCtx.fillStyle = '#8B5CF6';  // Lila normal
+        }
+        boundaryCtx.fill();
+        boundaryCtx.strokeStyle = 'white';
+        boundaryCtx.lineWidth = 2;
+        boundaryCtx.stroke();
+
+        // Punkt-Nummer anzeigen
+        boundaryCtx.fillStyle = 'white';
+        boundaryCtx.font = 'bold 10px sans-serif';
+        boundaryCtx.textAlign = 'center';
+        boundaryCtx.textBaseline = 'middle';
+        boundaryCtx.fillText(i + 1, p.x, p.y);
+    });
+}
+
+function getCanvasCoords(e) {
+    const rect = boundaryCanvas.getBoundingClientRect();
+    const scaleX = boundaryCanvas.width / rect.width;
+    const scaleY = boundaryCanvas.height / rect.height;
+    return {
+        x: (e.clientX - rect.left) * scaleX,
+        y: (e.clientY - rect.top) * scaleY
+    };
+}
+
+function findPointAt(x, y) {
+    for (let i = 0; i < boundaryPoints.length; i++) {
+        const p = boundaryPoints[i];
+        const dist = Math.sqrt((p.x - x) ** 2 + (p.y - y) ** 2);
+        if (dist <= POINT_HIT_RADIUS) return i;
+    }
+    return null;
+}
+
+function findLineAt(x, y) {
+    if (boundaryPoints.length < 2) return null;
+
+    const numLines = boundaryPolygonClosed ? boundaryPoints.length : boundaryPoints.length - 1;
+
+    for (let i = 0; i < numLines; i++) {
+        const p1 = boundaryPoints[i];
+        const p2 = boundaryPoints[(i + 1) % boundaryPoints.length];
+
+        // Punkt-zu-Linie Distanz
+        const lineLen = Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2);
+        if (lineLen === 0) continue;
+
+        const t = Math.max(0, Math.min(1, ((x - p1.x) * (p2.x - p1.x) + (y - p1.y) * (p2.y - p1.y)) / (lineLen * lineLen)));
+        const projX = p1.x + t * (p2.x - p1.x);
+        const projY = p1.y + t * (p2.y - p1.y);
+        const dist = Math.sqrt((x - projX) ** 2 + (y - projY) ** 2);
+
+        if (dist <= LINE_HIT_DISTANCE && t > 0.1 && t < 0.9) {
+            return {index: i, x: projX, y: projY};
+        }
+    }
+    return null;
+}
+
+function updateStatus() {
+    const statusEl = document.getElementById('boundaryStatus');
+    if (boundaryPolygonClosed) {
+        statusEl.textContent = `Polygon geschlossen (${boundaryPoints.length} Punkte). Ziehe Punkte zum Verschieben, klicke auf Linien zum Einfügen.`;
+    } else if (boundaryPoints.length === 0) {
+        statusEl.textContent = 'Klicke auf das Bild um Punkte zu setzen.';
+    } else {
+        statusEl.textContent = `${boundaryPoints.length} Punkte. Klicke weiter oder "Polygon schliessen".`;
+    }
+    document.getElementById('closeBoundaryBtn').disabled = boundaryPoints.length < 3;
+}
+
+// Mouse Events
+boundaryCanvas.addEventListener('mousedown', (e) => {
+    if (!boundaryFrameData) return;
+    const {x, y} = getCanvasCoords(e);
+
+    // Prüfe ob auf Punkt geklickt
+    const pointIdx = findPointAt(x, y);
+    if (pointIdx !== null) {
+        boundaryDragging = pointIdx;
+        boundaryCanvas.style.cursor = 'grabbing';
+        return;
+    }
+
+    // Prüfe ob auf Linie geklickt -> Punkt einfügen
+    if (boundaryPolygonClosed || boundaryPoints.length >= 2) {
+        const lineHit = findLineAt(x, y);
+        if (lineHit !== null) {
+            // Neuen Punkt einfügen
+            boundaryPoints.splice(lineHit.index + 1, 0, {x: lineHit.x, y: lineHit.y});
+            boundaryDragging = lineHit.index + 1;
+            boundaryCanvas.style.cursor = 'grabbing';
+            saveBoundaryPolygon();
+            drawBoundary();
+            updateStatus();
+            return;
+        }
+    }
+
+    // Neuen Punkt hinzufügen (nur wenn nicht geschlossen)
+    if (!boundaryPolygonClosed) {
+        boundaryPoints.push({x, y});
+        drawBoundary();
+        updateStatus();
+        saveBoundaryPolygon();
+    }
+});
+
+boundaryCanvas.addEventListener('mousemove', (e) => {
+    if (!boundaryFrameData) return;
+    const {x, y} = getCanvasCoords(e);
+
+    if (boundaryDragging !== null) {
+        // Punkt verschieben
+        boundaryPoints[boundaryDragging] = {x, y};
+        drawBoundary();
+        return;
+    }
+
+    // Hover-Erkennung
+    const oldHovering = boundaryHovering;
+    const oldHoverLine = boundaryHoverLine;
+
+    boundaryHovering = findPointAt(x, y);
+    boundaryHoverLine = boundaryHovering === null ? findLineAt(x, y) : null;
+
+    // Cursor ändern
+    if (boundaryHovering !== null) {
+        boundaryCanvas.style.cursor = 'grab';
+    } else if (boundaryHoverLine !== null) {
+        boundaryCanvas.style.cursor = 'copy';
+    } else if (!boundaryPolygonClosed) {
+        boundaryCanvas.style.cursor = 'crosshair';
+    } else {
+        boundaryCanvas.style.cursor = 'default';
+    }
+
+    // Neu zeichnen wenn sich Hover geändert hat
+    if (oldHovering !== boundaryHovering ||
+        JSON.stringify(oldHoverLine) !== JSON.stringify(boundaryHoverLine)) {
+        drawBoundary();
+    }
+});
+
+boundaryCanvas.addEventListener('mouseup', () => {
+    if (boundaryDragging !== null) {
+        boundaryDragging = null;
+        boundaryCanvas.style.cursor = boundaryHovering !== null ? 'grab' : 'default';
+        saveBoundaryPolygon();
+    }
+});
+
+boundaryCanvas.addEventListener('mouseleave', () => {
+    boundaryHovering = null;
+    boundaryHoverLine = null;
+    if (boundaryDragging !== null) {
+        boundaryDragging = null;
+        saveBoundaryPolygon();
+    }
+    drawBoundary();
+});
+
+document.getElementById('loadBoundaryFrameBtn').addEventListener('click', loadBoundaryFrame);
+
+document.getElementById('clearBoundaryBtn').addEventListener('click', () => {
+    boundaryPoints = [];
+    boundaryPolygonClosed = false;
+    updateStatus();
+    drawBoundary();
+    saveBoundaryPolygon();
+});
+
+document.getElementById('closeBoundaryBtn').addEventListener('click', () => {
+    if (boundaryPoints.length >= 3) {
+        boundaryPolygonClosed = true;
+        updateStatus();
+        drawBoundary();
+        saveBoundaryPolygon();
+    }
+});
+
+async function saveBoundaryPolygon() {
+    // Speichere Boundary in Analysis-Daten
+    try {
+        const response = await fetch(`/analysis/api/videos/${videoId}/boundary`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                boundary_polygon: boundaryPoints.map(p => [p.x, p.y])
+            })
+        });
+        const data = await response.json();
+        if (data.success) {
+            document.getElementById('boundaryStatus').textContent = `Polygon gespeichert (${boundaryPoints.length} Punkte)`;
+        }
+    } catch (e) {
+        console.error('Fehler beim Speichern:', e);
+    }
+}
+
+async function loadBoundaryPolygon() {
+    try {
+        const response = await fetch(`/analysis/api/videos/${videoId}/boundary`);
+        const data = await response.json();
+        if (data.boundary_polygon && data.boundary_polygon.length >= 3) {
+            boundaryPoints = data.boundary_polygon.map(p => ({x: p[0], y: p[1]}));
+            boundaryPolygonClosed = true;
+            document.getElementById('closeBoundaryBtn').disabled = false;
+            document.getElementById('boundaryStatus').textContent = `Polygon geladen (${boundaryPoints.length} Punkte)`;
+        }
+    } catch (e) {
+        // Kein Polygon vorhanden
+    }
+}
+
+// Initial render
+renderSnippetList();
+updateStepStatus();
+loadBoundaryPolygon();
+
+// Prüfe ob bereits Snippets existieren und setze Step
+if (snippets.length > 0) {
+    if (snippets.every(s => s.tracked)) {
+        goToStep(6);  // Review
+    } else if (snippets.every(s => s.extracted)) {
+        goToStep(3);  // Teams konfigurieren
+    } else if (snippets.some(s => s.id)) {
+        goToStep(2);  // Extrahieren
+    }
+}
+</script>
+{% endblock %}

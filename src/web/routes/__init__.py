@@ -20,3 +20,6 @@ def register_blueprints(app: Flask):
 
     from src.web.routes.calibration import calibration_bp
     app.register_blueprint(calibration_bp)
+
+    from src.web.routes.analysis import analysis_bp
+    app.register_blueprint(analysis_bp)
