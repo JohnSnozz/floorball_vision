@@ -1,0 +1,2052 @@
+{% extends "base.html" %}
+
+{% block title %}Einfache Kalibrierung - {{ video.filename }}{% endblock %}
+
+{% block head %}
+<style>
+    .step-panel {
+        transition: all 0.3s ease;
+    }
+    .step-panel.collapsed {
+        max-height: 60px;
+        overflow: hidden;
+    }
+    .step-panel.active {
+        border-color: #3B82F6;
+        background: #EFF6FF;
+    }
+    .step-panel.completed {
+        border-color: #10B981;
+        background: #ECFDF5;
+    }
+    .step-indicator {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        flex-shrink: 0;
+    }
+    .step-indicator.pending { background: #E5E7EB; color: #6B7280; }
+    .step-indicator.active { background: #3B82F6; color: white; }
+    .step-indicator.completed { background: #10B981; color: white; }
+
+    .screenshot-thumb {
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .screenshot-thumb:hover {
+        transform: scale(1.05);
+    }
+    .screenshot-thumb.selected {
+        ring: 3px solid #3B82F6;
+        border: 3px solid #3B82F6;
+    }
+
+    #image-canvas, #field-canvas {
+        border: 2px solid #E5E7EB;
+        border-radius: 8px;
+        display: block;
+    }
+
+    .point-pair-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 8px;
+        background: #DCFCE7;
+        color: #166534;
+        border-radius: 9999px;
+        font-size: 12px;
+        cursor: pointer;
+    }
+    .point-pair-chip:hover {
+        background: #FEE2E2;
+        color: #991B1B;
+    }
+
+    .zoom-controls {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+    }
+    .zoom-controls button {
+        width: 32px;
+        height: 32px;
+        border-radius: 4px;
+        border: 1px solid #D1D5DB;
+        background: white;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .zoom-controls button:hover {
+        background: #F3F4F6;
+    }
+
+    /* Hover-Vorschau für Screenshots */
+    .screenshot-thumb {
+        position: relative;
+    }
+    .screenshot-preview {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        pointer-events: none;
+        border: 3px solid #3B82F6;
+        border-radius: 8px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        max-width: 600px;
+        max-height: 400px;
+    }
+    .screenshot-preview.visible {
+        display: block;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-6" style="max-width: 1800px;">
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <a href="{{ url_for('calibration.index') }}" class="text-blue-500 hover:underline text-sm">
+                &larr; Zurück zur Übersicht
+            </a>
+            <h1 class="text-2xl font-bold mt-2">Kalibrierung: {{ video.filename or video.original_filename }}</h1>
+        </div>
+    </div>
+
+    <!-- Workflow Steps -->
+    <div class="space-y-4">
+
+        <!-- Step 1: Screenshot -->
+        <div id="step1-panel" class="step-panel border-2 rounded-lg p-4 active">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="toggleStep(1)">
+                <div id="step1-indicator" class="step-indicator active">1</div>
+                <h2 class="text-lg font-semibold flex-1">Screenshot auswählen</h2>
+                <span id="step1-status" class="text-sm text-gray-500"></span>
+                <svg class="w-5 h-5 text-gray-400 step-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+            </div>
+
+            <div id="step1-content" class="mt-4">
+                <p class="text-gray-600 mb-4">
+                    Wähle einen oder mehrere Screenshots aus dem Video. Längeres Hovern zeigt eine grössere Vorschau.
+                </p>
+
+                <!-- Hover-Vorschau Container -->
+                <img id="screenshot-preview" class="screenshot-preview" alt="Vorschau">
+
+                <div id="screenshot-loading" class="hidden text-center py-8">
+                    <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                    <p class="mt-2 text-gray-600">Screenshots werden extrahiert...</p>
+                </div>
+
+                <div id="screenshot-empty" class="text-center py-6">
+                    <button onclick="generateScreenshots()" class="bg-blue-500 text-white px-6 py-3 rounded-lg hover:bg-blue-600">
+                        Screenshots generieren
+                    </button>
+                </div>
+
+                <div id="screenshot-gallery" class="hidden">
+                    <div class="grid grid-cols-5 gap-2 max-h-48 overflow-y-auto" id="screenshot-grid">
+                        <!-- Screenshots -->
+                    </div>
+                    <div class="flex justify-between mt-4">
+                        <button onclick="generateScreenshots()" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm">
+                            Neu generieren
+                        </button>
+                        <button onclick="confirmStep1()" id="step1-next" disabled
+                                class="px-6 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400">
+                            Weiter &rarr;
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2: Lens Correction -->
+        <div id="step2-panel" class="step-panel border-2 rounded-lg p-4 collapsed">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="toggleStep(2)">
+                <div id="step2-indicator" class="step-indicator pending">2</div>
+                <h2 class="text-lg font-semibold flex-1">Bild entzerren (Fisheye-Korrektur)</h2>
+                <span id="step2-status" class="text-sm text-gray-500"></span>
+                <svg class="w-5 h-5 text-gray-400 step-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+            </div>
+
+            <div id="step2-content" class="mt-4 hidden">
+                <p class="text-gray-600 mb-4">
+                    Wähle ein Lens-Profil oder passe die Parameter manuell an. Mit "Custom" kannst du k1-k4 feintunen.
+                </p>
+
+                <!-- Profil-Auswahl -->
+                <div class="grid grid-cols-3 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Lens-Profil:</label>
+                        <select id="lens-profile-select" class="w-full border rounded px-3 py-2" onchange="onProfileChange()">
+                            <option value="">Lade Profile...</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Basis-Profil für Custom:</label>
+                        <select id="base-profile-select" class="w-full border rounded px-3 py-2 disabled:bg-gray-100" disabled onchange="loadBaseProfileParams()">
+                            <option value="">-- Wähle Startpunkt --</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-2">
+                            Zoom-Out: <span id="zoom-value">1.2</span>x
+                        </label>
+                        <input type="range" id="zoom-slider" min="1.0" max="5.0" step="0.05" value="1.2"
+                               class="w-full" oninput="updateZoomValue(); if(isCustomMode) updateCustomPreview();">
+                        <p class="text-xs text-gray-500">Höher = mehr Ecken sichtbar (1.0-5.0)</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-2">
+                            Rotation: <span id="rotation-value">0.0</span>°
+                        </label>
+                        <input type="range" id="rotation-slider" min="-5.0" max="5.0" step="0.1" value="0.0"
+                               class="w-full" oninput="updateRotationValue(); if(isCustomMode) updateCustomPreview();">
+                        <p class="text-xs text-gray-500">Feine Drehung (-5° bis +5°)</p>
+                    </div>
+                </div>
+
+                <!-- Custom Parameter Panel (versteckt bis "Custom" gewählt) -->
+                <div id="custom-params-panel" class="hidden border-2 border-purple-300 rounded-lg p-4 mb-4 bg-purple-50">
+                    <h4 class="font-medium text-purple-800 mb-3">Custom Fisheye-Parameter (k1-k4)</h4>
+                    <p class="text-sm text-purple-600 mb-4">
+                        Passe die Distortion-Koeffizienten an, bis die Linien im Bild gerade sind.
+                        Nutze die horizontalen Hilfslinien und das Trapez zur Kontrolle.
+                    </p>
+
+                    <div class="grid grid-cols-2 gap-4 mb-4">
+                        <!-- k1 Slider -->
+                        <div>
+                            <label class="block text-sm font-medium mb-1">
+                                k1: <span id="k1-value">0.15</span>
+                            </label>
+                            <input type="range" id="k1-slider" min="-0.5" max="0.5" step="0.005" value="0.15"
+                                   class="w-full" oninput="updateSliderValue('k1'); updateCustomPreview();">
+                            <p class="text-xs text-gray-500">Hauptkorrektur (radial)</p>
+                        </div>
+                        <!-- k2 Slider -->
+                        <div>
+                            <label class="block text-sm font-medium mb-1">
+                                k2: <span id="k2-value">-0.15</span>
+                            </label>
+                            <input type="range" id="k2-slider" min="-0.5" max="0.5" step="0.005" value="-0.15"
+                                   class="w-full" oninput="updateSliderValue('k2'); updateCustomPreview();">
+                            <p class="text-xs text-gray-500">Sekundäre Korrektur</p>
+                        </div>
+                        <!-- k3 Slider -->
+                        <div>
+                            <label class="block text-sm font-medium mb-1">
+                                k3: <span id="k3-value">0.10</span>
+                            </label>
+                            <input type="range" id="k3-slider" min="-0.3" max="0.3" step="0.005" value="0.10"
+                                   class="w-full" oninput="updateSliderValue('k3'); updateCustomPreview();">
+                            <p class="text-xs text-gray-500">Feinkorrektur</p>
+                        </div>
+                        <!-- k4 Slider -->
+                        <div>
+                            <label class="block text-sm font-medium mb-1">
+                                k4: <span id="k4-value">-0.04</span>
+                            </label>
+                            <input type="range" id="k4-slider" min="-0.2" max="0.2" step="0.002" value="-0.04"
+                                   class="w-full" oninput="updateSliderValue('k4'); updateCustomPreview();">
+                            <p class="text-xs text-gray-500">Extra Feinkorrektur</p>
+                        </div>
+                    </div>
+
+                    <!-- Trapez-Modus -->
+                    <div class="flex items-center gap-4 mb-4 p-3 bg-white rounded border">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="trapez-mode" class="w-4 h-4" onchange="toggleTrapezMode()">
+                            <span class="text-sm font-medium">Trapez-Modus</span>
+                        </label>
+                        <span class="text-sm text-gray-500">Klicke 4 Punkte im Bild um ein Trapez zu zeichnen (Fluchtpunkt-Kontrolle)</span>
+                        <button onclick="clearTrapez()" class="text-xs px-2 py-1 bg-red-100 text-red-600 rounded hover:bg-red-200">
+                            Trapez löschen
+                        </button>
+                    </div>
+
+                    <!-- Speichern als Profil -->
+                    <div class="flex items-center gap-4 mt-4 pt-4 border-t">
+                        <input type="text" id="custom-profile-name" placeholder="Name für Custom-Profil"
+                               class="flex-1 border rounded px-3 py-2">
+                        <button onclick="saveCustomProfile()" class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600">
+                            Als Profil speichern
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Screenshot-Wechsler für Step 2 -->
+                <div id="step2-screenshot-selector" class="mb-4 p-3 bg-gray-50 rounded-lg">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-sm font-medium">Screenshot wählen:</span>
+                        <span class="text-xs text-gray-500" id="step2-screenshot-count"></span>
+                    </div>
+                    <div class="flex gap-2 overflow-x-auto pb-2" id="step2-screenshot-grid"></div>
+                </div>
+
+                <div class="flex gap-4 mb-4">
+                    <button onclick="undistortImage()" id="undistort-btn"
+                            class="px-6 py-2 bg-purple-500 text-white rounded hover:bg-purple-600">
+                        Bild entzerren
+                    </button>
+                    <span id="undistort-status" class="text-sm text-gray-600 self-center"></span>
+                </div>
+
+                <!-- Vorher/Nachher Vorschau -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <h4 class="text-sm font-medium mb-2">Original (verzerrt):</h4>
+                        <img id="original-preview" class="w-full rounded border" alt="Original">
+                    </div>
+                    <div class="relative">
+                        <div class="flex justify-between items-center mb-2">
+                            <h4 class="text-sm font-medium">Entzerrt:</h4>
+                            <div class="flex items-center gap-2" id="preview-zoom-controls" style="display: none;">
+                                <button onclick="previewZoomOut()" class="w-7 h-7 border rounded bg-white hover:bg-gray-100 text-sm font-bold">-</button>
+                                <span id="preview-zoom-level" class="text-xs w-12 text-center">100%</span>
+                                <button onclick="previewZoomIn()" class="w-7 h-7 border rounded bg-white hover:bg-gray-100 text-sm font-bold">+</button>
+                                <button onclick="previewZoomReset()" class="px-2 h-7 border rounded bg-white hover:bg-gray-100 text-xs">Reset</button>
+                            </div>
+                        </div>
+                        <div id="undistorted-container" class="relative overflow-hidden rounded border" style="max-height: 400px;">
+                            <div id="undistorted-wrapper" style="transform-origin: center center; cursor: grab;">
+                                <img id="undistorted-preview" class="w-full hidden" alt="Entzerrt" style="max-width: none;">
+                                <!-- Canvas für Trapez-Overlay -->
+                                <canvas id="trapez-canvas" class="absolute top-0 left-0 w-full h-full hidden pointer-events-none"></canvas>
+                            </div>
+                        </div>
+                        <div id="undistorted-placeholder" class="w-full h-32 bg-gray-100 rounded border flex items-center justify-center text-gray-400">
+                            Noch nicht entzerrt
+                        </div>
+                        <p class="text-xs text-gray-500 mt-1" id="preview-zoom-hint" style="display: none;">Mausrad = Zoom | Ziehen = Pan</p>
+                    </div>
+                </div>
+
+                <div class="flex justify-between mt-4">
+                    <button onclick="goToStep(1)" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">
+                        &larr; Zurück
+                    </button>
+                    <button onclick="confirmStep2()" id="step2-next" disabled
+                            class="px-6 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400">
+                        Weiter &rarr;
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 3: Set Points -->
+        <div id="step3-panel" class="step-panel border-2 rounded-lg p-4 collapsed">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="toggleStep(3)">
+                <div id="step3-indicator" class="step-indicator pending">3</div>
+                <h2 class="text-lg font-semibold flex-1">Referenzpunkte setzen</h2>
+                <span id="step3-status" class="text-sm text-gray-500"></span>
+                <svg class="w-5 h-5 text-gray-400 step-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+            </div>
+
+            <div id="step3-content" class="mt-4 hidden">
+                <p class="text-gray-600 mb-4">
+                    Klicke auf mindestens 4 identische Punkte: zuerst im <strong>entzerrten Bild</strong> (links), dann auf dem <strong>Spielfeld</strong> (rechts).
+                    <br><span class="text-sm">Leertaste + Maus = Pan | Mausrad = Zoom | Rechtsklick = letzten Punkt entfernen</span>
+                </p>
+
+                <!-- Screenshot-Wechsler -->
+                <div class="mb-4 p-3 bg-gray-50 rounded-lg">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-sm font-medium">Screenshot wechseln:</span>
+                        <div class="zoom-controls">
+                            <button onclick="zoomIn()" title="Zoom In">+</button>
+                            <span id="zoom-level">100%</span>
+                            <button onclick="zoomOut()" title="Zoom Out">-</button>
+                            <button onclick="resetView()" title="Reset">&#8634;</button>
+                        </div>
+                    </div>
+                    <div class="flex gap-2 overflow-x-auto pb-2" id="screenshot-selector">
+                        <!-- Mini-Thumbnails zum Wechseln -->
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <!-- Entzerrtes Bild -->
+                    <div>
+                        <div class="flex justify-between items-center mb-2">
+                            <h4 class="font-medium">Screenshot (Pixel-Koordinaten)</h4>
+                            <div class="flex items-center gap-2">
+                                <span id="image-point-count" class="text-sm text-gray-500">0 Punkte</span>
+                                <button onclick="removeLastImagePoint()" class="text-xs px-2 py-1 bg-red-100 text-red-600 rounded hover:bg-red-200">
+                                    Letzten entfernen
+                                </button>
+                            </div>
+                        </div>
+                        <div class="border rounded-lg overflow-hidden" style="height: 450px;">
+                            <canvas id="image-canvas" width="800" height="450"></canvas>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-1">Leertaste+Maus = Pan | Mausrad = Zoom | Rechtsklick = letzten Punkt entfernen</p>
+                    </div>
+
+                    <!-- Spielfeld -->
+                    <div>
+                        <div class="flex justify-between items-center mb-2">
+                            <h4 class="font-medium">Spielfeld (Meter-Koordinaten)</h4>
+                            <div class="flex items-center gap-2">
+                                <span id="field-point-count" class="text-sm text-gray-500">0 Punkte</span>
+                                <button onclick="removeLastFieldPoint()" class="text-xs px-2 py-1 bg-red-100 text-red-600 rounded hover:bg-red-200">
+                                    Letzten entfernen
+                                </button>
+                            </div>
+                        </div>
+                        <div class="border rounded-lg overflow-hidden bg-gray-100">
+                            <canvas id="field-canvas" width="600" height="400"></canvas>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-1">Klicke auf markierte Punkte oder frei im Feld | Rechtsklick = letzten entfernen</p>
+                    </div>
+                </div>
+
+                <!-- Punkt-Paare Liste -->
+                <div class="mt-4 p-3 bg-gray-50 rounded-lg">
+                    <h4 class="font-medium mb-2">Gesetzte Punkt-Paare: <span id="pairs-count">0</span></h4>
+                    <div id="point-pairs-list" class="flex flex-wrap gap-2">
+                        <span class="text-gray-400 text-sm">Noch keine Punkte gesetzt</span>
+                    </div>
+                </div>
+
+                <div class="flex justify-between mt-4">
+                    <button onclick="goToStep(2)" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">
+                        &larr; Zurück
+                    </button>
+                    <button onclick="confirmStep3()" id="step3-next" disabled
+                            class="px-6 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400">
+                        Vorschau generieren &rarr;
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 4: Verify on Undistorted -->
+        <div id="step4-panel" class="step-panel border-2 rounded-lg p-4 collapsed">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="toggleStep(4)">
+                <div id="step4-indicator" class="step-indicator pending">4</div>
+                <h2 class="text-lg font-semibold flex-1">Overlay auf entzerrtem Bild prüfen</h2>
+                <span id="step4-status" class="text-sm text-gray-500"></span>
+                <svg class="w-5 h-5 text-gray-400 step-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+            </div>
+
+            <div id="step4-content" class="mt-4 hidden">
+                <p class="text-gray-600 mb-4">
+                    Prüfe ob das Spielfeld-Grid korrekt auf dem <strong>entzerrten</strong> Bild liegt.
+                </p>
+
+                <div class="border rounded-lg overflow-hidden mb-4">
+                    <img id="overlay-undistorted" class="max-w-full" alt="Overlay auf entzerrtem Bild">
+                </div>
+
+                <div class="p-3 bg-gray-50 rounded-lg mb-4">
+                    <h4 class="font-medium mb-2">Legende:</h4>
+                    <div class="flex flex-wrap gap-4 text-sm">
+                        <span><span class="inline-block w-4 h-1 bg-green-500 mr-1"></span> Grid (5m)</span>
+                        <span><span class="inline-block w-4 h-1 bg-yellow-400 mr-1"></span> Mittellinie</span>
+                        <span><span class="inline-block w-4 h-1 bg-red-500 mr-1"></span> Spielfeldrand</span>
+                        <span><span class="inline-block w-4 h-1 bg-cyan-400 mr-1"></span> Mittelkreis</span>
+                        <span><span class="inline-block w-4 h-1 bg-pink-500 mr-1"></span> Torräume</span>
+                    </div>
+                </div>
+
+                <div class="flex justify-between mt-4">
+                    <button onclick="goToStep(3)" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">
+                        &larr; Punkte anpassen
+                    </button>
+                    <button onclick="confirmStep4()" id="step4-next"
+                            class="px-6 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+                        Weiter zur Schlusskontrolle &rarr;
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 5: Final Check on Distorted -->
+        <div id="step5-panel" class="step-panel border-2 rounded-lg p-4 collapsed">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="toggleStep(5)">
+                <div id="step5-indicator" class="step-indicator pending">5</div>
+                <h2 class="text-lg font-semibold flex-1">Schlusskontrolle auf Original</h2>
+                <span id="step5-status" class="text-sm text-gray-500"></span>
+                <svg class="w-5 h-5 text-gray-400 step-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+            </div>
+
+            <div id="step5-content" class="mt-4 hidden">
+                <p class="text-gray-600 mb-4">
+                    Das Spielfeld-Overlay wurde zurück auf das <strong>verzerrte Original-Bild</strong> transformiert.
+                    Die Linien sollten den gekrümmten Banden folgen.
+                </p>
+
+                <div class="border rounded-lg overflow-hidden mb-4">
+                    <img id="overlay-distorted" class="max-w-full" alt="Overlay auf verzerrtem Bild">
+                </div>
+
+                <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+                    <p class="text-yellow-800">
+                        <strong>Hinweis:</strong> Die Linien sind absichtlich gekrümmt, weil das Original-Bild eine Fisheye-Verzerrung hat.
+                        Wenn die Linien den tatsächlichen Feldlinien/Banden folgen, ist die Kalibrierung korrekt.
+                    </p>
+                </div>
+
+                <div class="flex justify-between mt-4">
+                    <button onclick="goToStep(4)" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">
+                        &larr; Zurück
+                    </button>
+                    <div class="flex gap-2">
+                        <input type="text" id="calibration-name" placeholder="Name der Kalibrierung"
+                               class="border rounded px-3 py-2 w-64" value="Kalibrierung {{ video.filename }}">
+                        <button onclick="saveCalibration()" id="save-btn"
+                                class="px-6 py-2 bg-green-500 text-white rounded hover:bg-green-600">
+                            Speichern
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Include Calibration Canvas Library -->
+<script src="/static/js/calibration.js"></script>
+
+<script>
+const videoId = '{{ video.id }}';
+let currentStep = 1;
+let screenshots = [];
+let selectedScreenshotIndices = [];  // Mehrfachauswahl
+let activeScreenshotIndex = null;    // Aktuell im Canvas gezeigter Screenshot
+let lensProfiles = [];
+let selectedLensProfile = null;
+let isUndistorted = false;
+
+// Gespeicherte Entzerrungs-Parameter (für Übernahme in Step 3)
+let savedUndistortParams = {
+    lensProfileId: null,
+    baseProfileId: null,
+    k1: null,
+    k2: null,
+    k3: null,
+    k4: null,
+    zoomOut: 1.2,
+    rotation: 0.0,
+    isCustom: false
+};
+
+// Canvas-Objekte
+let imageCanvas = null;
+let fieldCanvas = null;
+
+// Punkt-Paare: [{image: {x, y}, field: {x, y}, fieldName: string}, ...]
+let pointPairs = [];
+let pendingImagePoint = null;  // Bild-Punkt der auf Spielfeld-Punkt wartet
+
+// Hover-Vorschau
+let hoverTimeout = null;
+const HOVER_DELAY = 400;  // ms bis Vorschau erscheint
+
+// ========================================
+// INITIALIZATION
+// ========================================
+
+document.addEventListener('DOMContentLoaded', async () => {
+    // Lens-Profile laden
+    await loadLensProfiles();
+
+    // Bestehende Screenshots laden
+    await loadExistingScreenshots();
+
+    // Preview Zoom/Pan Setup
+    setupPreviewZoomPan();
+
+    // Work-in-Progress Daten laden (falls vorhanden)
+    await loadWipData();
+});
+
+// ========================================
+// WORK-IN-PROGRESS PERSISTENCE
+// ========================================
+
+async function loadWipData() {
+    try {
+        const response = await fetch(`/calibration/api/videos/${videoId}/calibration/wip`);
+        const result = await response.json();
+
+        if (result.exists && result.data) {
+            const wip = result.data;
+            console.log('WIP data loaded:', wip);
+
+            // Screenshot-Auswahl wiederherstellen
+            if (wip.selected_screenshots && wip.selected_screenshots.length > 0) {
+                selectedScreenshotIndices = wip.selected_screenshots;
+                renderScreenshotGallery();
+                document.getElementById('step1-next').disabled = false;
+                document.getElementById('step1-status').textContent = `${selectedScreenshotIndices.length} Screenshot(s) ausgewählt`;
+            }
+
+            // Aktiver Screenshot
+            if (wip.active_screenshot !== null && wip.active_screenshot !== undefined) {
+                activeScreenshotIndex = wip.active_screenshot;
+            }
+
+            // Undistort-Parameter wiederherstellen
+            if (wip.undistort_params) {
+                savedUndistortParams = { ...savedUndistortParams, ...wip.undistort_params };
+
+                // Slider-Werte setzen
+                if (wip.undistort_params.zoomOut) {
+                    document.getElementById('zoom-slider').value = wip.undistort_params.zoomOut;
+                    updateZoomValue();
+                }
+                if (wip.undistort_params.rotation !== undefined) {
+                    document.getElementById('rotation-slider').value = wip.undistort_params.rotation;
+                    updateRotationValue();
+                }
+
+                // Lens-Profil setzen
+                if (wip.undistort_params.lensProfileId) {
+                    document.getElementById('lens-profile-select').value = wip.undistort_params.lensProfileId;
+                    onProfileChange();
+                }
+
+                // k1-k4 Werte setzen (falls Custom)
+                if (wip.undistort_params.isCustom) {
+                    if (wip.undistort_params.k1 !== null) {
+                        document.getElementById('k1-slider').value = wip.undistort_params.k1;
+                        updateSliderValue('k1');
+                    }
+                    if (wip.undistort_params.k2 !== null) {
+                        document.getElementById('k2-slider').value = wip.undistort_params.k2;
+                        updateSliderValue('k2');
+                    }
+                    if (wip.undistort_params.k3 !== null) {
+                        document.getElementById('k3-slider').value = wip.undistort_params.k3;
+                        updateSliderValue('k3');
+                    }
+                    if (wip.undistort_params.k4 !== null) {
+                        document.getElementById('k4-slider').value = wip.undistort_params.k4;
+                        updateSliderValue('k4');
+                    }
+                }
+            }
+
+            // Punkt-Paare wiederherstellen
+            if (wip.point_pairs && wip.point_pairs.length > 0) {
+                pointPairs = wip.point_pairs;
+                console.log('Restored point pairs:', pointPairs.length);
+            }
+
+            // Zum gespeicherten Schritt springen (falls > 1)
+            if (wip.current_step && wip.current_step > 1) {
+                // Mindestens die nötigen Schritte durchlaufen
+                if (selectedScreenshotIndices.length > 0) {
+                    // Step 1 als erledigt markieren
+                    document.getElementById('step1-indicator').classList.remove('active', 'pending');
+                    document.getElementById('step1-indicator').classList.add('completed');
+                }
+
+                // Hinweis anzeigen
+                if (pointPairs.length > 0) {
+                    alert(`Wiederhergestellt: ${pointPairs.length} Referenzpunkte gefunden.\n\nKlicke "Weiter" um fortzufahren.`);
+                }
+            }
+        }
+    } catch (err) {
+        console.error('Error loading WIP data:', err);
+    }
+}
+
+async function saveWipData() {
+    try {
+        await fetch(`/calibration/api/videos/${videoId}/calibration/wip`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                point_pairs: pointPairs,
+                undistort_params: savedUndistortParams,
+                selected_screenshots: selectedScreenshotIndices,
+                active_screenshot: activeScreenshotIndex,
+                current_step: currentStep
+            })
+        });
+        console.log('WIP data saved');
+    } catch (err) {
+        console.error('Error saving WIP data:', err);
+    }
+}
+
+async function deleteWipData() {
+    try {
+        await fetch(`/calibration/api/videos/${videoId}/calibration/wip`, {
+            method: 'DELETE'
+        });
+        console.log('WIP data deleted');
+    } catch (err) {
+        console.error('Error deleting WIP data:', err);
+    }
+}
+
+// ========================================
+// STEP NAVIGATION
+// ========================================
+
+function toggleStep(step) {
+    const indicator = document.getElementById(`step${step}-indicator`);
+    if (indicator.classList.contains('pending') && step > currentStep) {
+        return;
+    }
+    goToStep(step);
+}
+
+function goToStep(step) {
+    for (let i = 1; i <= 5; i++) {
+        const panel = document.getElementById(`step${i}-panel`);
+        const content = document.getElementById(`step${i}-content`);
+        const indicator = document.getElementById(`step${i}-indicator`);
+
+        if (i === step) {
+            panel.classList.remove('collapsed');
+            panel.classList.add('active');
+            panel.classList.remove('completed');
+            content.classList.remove('hidden');
+            indicator.classList.remove('pending', 'completed');
+            indicator.classList.add('active');
+        } else if (i < step) {
+            panel.classList.add('collapsed');
+            panel.classList.remove('active');
+            panel.classList.add('completed');
+            content.classList.add('hidden');
+            indicator.classList.remove('pending', 'active');
+            indicator.classList.add('completed');
+        } else {
+            panel.classList.add('collapsed');
+            panel.classList.remove('active', 'completed');
+            content.classList.add('hidden');
+            indicator.classList.remove('active', 'completed');
+            indicator.classList.add('pending');
+        }
+    }
+    currentStep = step;
+}
+
+// ========================================
+// STEP 1: SCREENSHOTS
+// ========================================
+
+async function loadExistingScreenshots() {
+    try {
+        const response = await fetch(`/calibration/api/videos/${videoId}/screenshots`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ num_screenshots: 0 })
+        });
+        const result = await response.json();
+
+        if (result.success && result.screenshots.length > 0) {
+            screenshots = result.screenshots;
+            renderScreenshotGallery();
+            document.getElementById('screenshot-empty').classList.add('hidden');
+            document.getElementById('screenshot-gallery').classList.remove('hidden');
+        }
+    } catch (err) {
+        console.error('Error loading screenshots:', err);
+    }
+}
+
+async function generateScreenshots() {
+    document.getElementById('screenshot-empty').classList.add('hidden');
+    document.getElementById('screenshot-gallery').classList.add('hidden');
+    document.getElementById('screenshot-loading').classList.remove('hidden');
+
+    try {
+        const response = await fetch(`/calibration/api/videos/${videoId}/screenshots`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ num_screenshots: 20 })
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            screenshots = result.screenshots;
+            selectedScreenshotIndices = [];  // Auswahl zurücksetzen
+            document.getElementById('screenshot-grid').innerHTML = '';  // Grid leeren für Neuaufbau
+            renderScreenshotGallery();
+            document.getElementById('screenshot-loading').classList.add('hidden');
+            document.getElementById('screenshot-gallery').classList.remove('hidden');
+        } else {
+            alert('Fehler: ' + result.error);
+            document.getElementById('screenshot-loading').classList.add('hidden');
+            document.getElementById('screenshot-empty').classList.remove('hidden');
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+        document.getElementById('screenshot-loading').classList.add('hidden');
+        document.getElementById('screenshot-empty').classList.remove('hidden');
+    }
+}
+
+function renderScreenshotGallery() {
+    const grid = document.getElementById('screenshot-grid');
+
+    // Beim ersten Rendern: Grid aufbauen
+    if (grid.children.length === 0) {
+        screenshots.forEach((screenshot, index) => {
+            const div = document.createElement('div');
+            div.className = 'screenshot-thumb rounded overflow-hidden border-2 border-transparent hover:border-blue-300';
+            div.style.position = 'relative';
+            div.dataset.index = index;
+            div.innerHTML = `
+                <img src="/calibration/screenshot/${videoId}/screenshots/${screenshot.filename}"
+                     class="w-full h-16 object-cover"
+                     data-index="${index}">
+                <div class="selection-badge absolute top-0 right-0 bg-blue-500 text-white text-xs px-1 rounded-bl hidden"></div>
+            `;
+            div.onclick = () => toggleScreenshotSelection(index);
+
+            // Hover-Vorschau Events
+            div.onmouseenter = (e) => startHoverPreview(e, index);
+            div.onmousemove = (e) => moveHoverPreview(e);
+            div.onmouseleave = () => hideHoverPreview();
+
+            grid.appendChild(div);
+        });
+    }
+
+    // Nur Klassen und Badge aktualisieren, ohne Bilder neu zu laden
+    Array.from(grid.children).forEach((div, index) => {
+        const isSelected = selectedScreenshotIndices.includes(index);
+        const badge = div.querySelector('.selection-badge');
+
+        if (isSelected) {
+            div.classList.add('selected', 'border-blue-500');
+            div.classList.remove('border-transparent');
+            badge.textContent = selectedScreenshotIndices.indexOf(index) + 1;
+            badge.classList.remove('hidden');
+        } else {
+            div.classList.remove('selected', 'border-blue-500');
+            div.classList.add('border-transparent');
+            badge.classList.add('hidden');
+        }
+    });
+}
+
+function toggleScreenshotSelection(index) {
+    const pos = selectedScreenshotIndices.indexOf(index);
+    if (pos >= 0) {
+        // Abwählen
+        selectedScreenshotIndices.splice(pos, 1);
+    } else {
+        // Auswählen
+        selectedScreenshotIndices.push(index);
+    }
+
+    renderScreenshotGallery();
+    document.getElementById('step1-next').disabled = selectedScreenshotIndices.length === 0;
+
+    if (selectedScreenshotIndices.length === 0) {
+        document.getElementById('step1-status').textContent = '';
+    } else if (selectedScreenshotIndices.length === 1) {
+        document.getElementById('step1-status').textContent = `1 Screenshot ausgewählt`;
+    } else {
+        document.getElementById('step1-status').textContent = `${selectedScreenshotIndices.length} Screenshots ausgewählt`;
+    }
+}
+
+// Hover-Vorschau Funktionen
+function startHoverPreview(e, index) {
+    hoverTimeout = setTimeout(() => {
+        const preview = document.getElementById('screenshot-preview');
+        const screenshot = screenshots[index];
+        preview.src = `/calibration/screenshot/${videoId}/screenshots/${screenshot.filename}?t=${Date.now()}`;
+        preview.classList.add('visible');
+        moveHoverPreview(e);
+    }, HOVER_DELAY);
+}
+
+function moveHoverPreview(e) {
+    const preview = document.getElementById('screenshot-preview');
+    if (!preview.classList.contains('visible')) return;
+
+    // Position neben dem Mauszeiger
+    let x = e.clientX + 20;
+    let y = e.clientY - 100;
+
+    // Am Bildschirmrand anpassen
+    if (x + 620 > window.innerWidth) {
+        x = e.clientX - 620;
+    }
+    if (y < 10) {
+        y = 10;
+    }
+    if (y + 420 > window.innerHeight) {
+        y = window.innerHeight - 420;
+    }
+
+    preview.style.left = x + 'px';
+    preview.style.top = y + 'px';
+}
+
+function hideHoverPreview() {
+    clearTimeout(hoverTimeout);
+    const preview = document.getElementById('screenshot-preview');
+    preview.classList.remove('visible');
+}
+
+function confirmStep1() {
+    if (selectedScreenshotIndices.length === 0) return;
+
+    // Ersten ausgewählten Screenshot als aktiven setzen
+    activeScreenshotIndex = selectedScreenshotIndices[0];
+
+    const screenshot = screenshots[activeScreenshotIndex];
+    const imgUrl = `/calibration/screenshot/${videoId}/screenshots/${screenshot.filename}`;
+    document.getElementById('original-preview').src = imgUrl;
+
+    // Screenshot-Wechsler in Step 2 aufbauen
+    renderStep2ScreenshotSelector();
+
+    // WIP speichern
+    saveWipData();
+
+    goToStep(2);
+}
+
+function renderStep2ScreenshotSelector() {
+    const grid = document.getElementById('step2-screenshot-grid');
+    const countEl = document.getElementById('step2-screenshot-count');
+    grid.innerHTML = '';
+
+    countEl.textContent = `${selectedScreenshotIndices.length} Screenshot(s) ausgewählt`;
+
+    selectedScreenshotIndices.forEach((idx, i) => {
+        const screenshot = screenshots[idx];
+        const isActive = idx === activeScreenshotIndex;
+
+        const div = document.createElement('div');
+        div.className = `flex-shrink-0 cursor-pointer rounded overflow-hidden border-2 ${
+            isActive ? 'border-blue-500' : 'border-transparent'
+        } hover:border-blue-300`;
+        div.innerHTML = `
+            <img src="/calibration/screenshot/${videoId}/screenshots/${screenshot.filename}"
+                 class="h-16 w-auto object-cover"
+                 title="Screenshot ${i + 1}">
+        `;
+        div.onclick = () => switchStep2Screenshot(idx);
+        grid.appendChild(div);
+    });
+}
+
+function switchStep2Screenshot(idx) {
+    activeScreenshotIndex = idx;
+
+    const screenshot = screenshots[idx];
+    const imgUrl = `/calibration/screenshot/${videoId}/screenshots/${screenshot.filename}`;
+    document.getElementById('original-preview').src = imgUrl;
+
+    // Screenshot-Wechsler aktualisieren (Highlighting)
+    renderStep2ScreenshotSelector();
+
+    // Falls bereits entzerrt, neu entzerren mit gleichem Profil
+    if (isUndistorted && isCustomMode) {
+        updateCustomPreview();
+    } else if (isUndistorted && selectedLensProfile) {
+        undistortImage();
+    }
+}
+
+// ========================================
+// STEP 2: LENS CORRECTION
+// ========================================
+
+// Custom-Modus Variablen
+let isCustomMode = false;
+let customUpdateTimeout = null;
+let trapezPoints = [];
+let isTrapezMode = false;
+
+// Preview Zoom/Pan Variablen
+let previewZoom = 1;
+let previewPanX = 0;
+let previewPanY = 0;
+let isPanning = false;
+let panStartX = 0;
+let panStartY = 0;
+
+async function loadLensProfiles() {
+    try {
+        const response = await fetch('/calibration/api/lens-profiles');
+        lensProfiles = await response.json();
+
+        const select = document.getElementById('lens-profile-select');
+        const baseSelect = document.getElementById('base-profile-select');
+
+        select.innerHTML = '<option value="">Kein Lens-Profil (kein Fisheye)</option>';
+        select.innerHTML += '<option value="custom">Custom (manuelle Parameter)</option>';
+        baseSelect.innerHTML = '<option value="">-- Wähle Startpunkt --</option>';
+
+        for (const profile of lensProfiles) {
+            const option = document.createElement('option');
+            option.value = profile.id;
+            option.textContent = profile.name;
+            select.appendChild(option);
+
+            // Auch für Basis-Profil
+            const baseOption = option.cloneNode(true);
+            baseSelect.appendChild(baseOption);
+        }
+    } catch (err) {
+        console.error('Error loading lens profiles:', err);
+    }
+}
+
+function onProfileChange() {
+    const select = document.getElementById('lens-profile-select');
+    const customPanel = document.getElementById('custom-params-panel');
+    const baseSelect = document.getElementById('base-profile-select');
+
+    if (select.value === 'custom') {
+        // Neuer Custom-Modus (von Grund auf)
+        isCustomMode = true;
+        customPanel.classList.remove('hidden');
+        baseSelect.disabled = false;
+        // Trapez-Canvas aktivieren
+        setupTrapezCanvas();
+    } else if (select.value) {
+        // Ein bestehendes Profil wurde ausgewählt
+        const profile = lensProfiles.find(p => p.id === select.value);
+
+        // Prüfen ob es ein gespeichertes Custom-Profil ist
+        const isCustomSaved = profile && profile.source === "Manuelle Anpassung";
+
+        if (isCustomSaved) {
+            // Gespeichertes Custom-Profil: Lade alle Parameter und zeige Custom-Panel
+            isCustomMode = true;
+            customPanel.classList.remove('hidden');
+            baseSelect.disabled = false;
+
+            // Basis-Profil setzen
+            if (profile.base_profile_id) {
+                baseSelect.value = profile.base_profile_id;
+            }
+
+            // k1-k4 Werte laden
+            const coeffs = profile.fisheye_params?.distortion_coeffs;
+            if (coeffs && coeffs.length >= 4) {
+                document.getElementById('k1-slider').value = coeffs[0];
+                document.getElementById('k2-slider').value = coeffs[1];
+                document.getElementById('k3-slider').value = coeffs[2];
+                document.getElementById('k4-slider').value = coeffs[3];
+                updateSliderValue('k1');
+                updateSliderValue('k2');
+                updateSliderValue('k3');
+                updateSliderValue('k4');
+            }
+
+            // zoom_out und rotation laden
+            if (profile.undistort_params) {
+                const params = profile.undistort_params;
+                if (params.zoom_out !== undefined) {
+                    document.getElementById('zoom-slider').value = params.zoom_out;
+                    updateZoomValue();
+                }
+                if (params.rotation !== undefined) {
+                    document.getElementById('rotation-slider').value = params.rotation;
+                    updateRotationValue();
+                }
+            }
+
+            // Trapez-Canvas aktivieren
+            setupTrapezCanvas();
+
+            console.log('Loaded custom profile:', profile.name, 'k1-k4:', coeffs, 'undistort_params:', profile.undistort_params);
+        } else {
+            // Standard-Profil (nicht custom)
+            isCustomMode = false;
+            customPanel.classList.add('hidden');
+            baseSelect.disabled = true;
+            isTrapezMode = false;
+            document.getElementById('trapez-mode').checked = false;
+
+            // Trotzdem undistort_params laden falls vorhanden
+            if (profile && profile.undistort_params) {
+                const params = profile.undistort_params;
+                if (params.zoom_out !== undefined) {
+                    document.getElementById('zoom-slider').value = params.zoom_out;
+                    updateZoomValue();
+                }
+                if (params.rotation !== undefined) {
+                    document.getElementById('rotation-slider').value = params.rotation;
+                    updateRotationValue();
+                }
+            }
+        }
+    } else {
+        // Kein Profil ausgewählt
+        isCustomMode = false;
+        customPanel.classList.add('hidden');
+        baseSelect.disabled = true;
+        isTrapezMode = false;
+        document.getElementById('trapez-mode').checked = false;
+    }
+}
+
+function loadBaseProfileParams() {
+    const baseProfileId = document.getElementById('base-profile-select').value;
+    if (!baseProfileId) return;
+
+    const profile = lensProfiles.find(p => p.id === baseProfileId);
+    if (!profile || !profile.fisheye_params) return;
+
+    const coeffs = profile.fisheye_params.distortion_coeffs;
+    if (coeffs && coeffs.length >= 4) {
+        document.getElementById('k1-slider').value = coeffs[0];
+        document.getElementById('k2-slider').value = coeffs[1];
+        document.getElementById('k3-slider').value = coeffs[2];
+        document.getElementById('k4-slider').value = coeffs[3];
+
+        updateSliderValue('k1');
+        updateSliderValue('k2');
+        updateSliderValue('k3');
+        updateSliderValue('k4');
+    }
+
+    // Auch undistort_params laden (zoom, rotation)
+    if (profile.undistort_params) {
+        const params = profile.undistort_params;
+        if (params.zoom_out !== undefined) {
+            document.getElementById('zoom-slider').value = params.zoom_out;
+            updateZoomValue();
+        }
+        if (params.rotation !== undefined) {
+            document.getElementById('rotation-slider').value = params.rotation;
+            updateRotationValue();
+        }
+    }
+
+    // Vorschau aktualisieren
+    updateCustomPreview();
+}
+
+function updateSliderValue(param) {
+    const slider = document.getElementById(`${param}-slider`);
+    const valueSpan = document.getElementById(`${param}-value`);
+    valueSpan.textContent = parseFloat(slider.value).toFixed(3);
+}
+
+function updateZoomValue() {
+    document.getElementById('zoom-value').textContent = document.getElementById('zoom-slider').value;
+}
+
+function updateRotationValue() {
+    document.getElementById('rotation-value').textContent = parseFloat(document.getElementById('rotation-slider').value).toFixed(1);
+}
+
+function updateCustomPreview() {
+    // Debounce um nicht zu viele Requests zu senden
+    clearTimeout(customUpdateTimeout);
+    customUpdateTimeout = setTimeout(doCustomUndistort, 300);
+}
+
+async function doCustomUndistort() {
+    if (!activeScreenshotIndex && activeScreenshotIndex !== 0) return;
+
+    const screenshot = screenshots[activeScreenshotIndex];
+    const baseProfileId = document.getElementById('base-profile-select').value;
+    const zoomOut = parseFloat(document.getElementById('zoom-slider').value);
+    const rotation = parseFloat(document.getElementById('rotation-slider').value);
+    const statusEl = document.getElementById('undistort-status');
+
+    const k1 = parseFloat(document.getElementById('k1-slider').value);
+    const k2 = parseFloat(document.getElementById('k2-slider').value);
+    const k3 = parseFloat(document.getElementById('k3-slider').value);
+    const k4 = parseFloat(document.getElementById('k4-slider').value);
+
+    statusEl.textContent = 'Aktualisiere...';
+
+    try {
+        const endpoint = trapezPoints.length === 4
+            ? `/calibration/api/videos/${videoId}/custom-undistort-with-trapez`
+            : `/calibration/api/videos/${videoId}/custom-undistort`;
+
+        const body = {
+            base_profile_id: baseProfileId || null,
+            k1, k2, k3, k4,
+            zoom_out: zoomOut,
+            rotation: rotation,
+            screenshot_path: `data/calibration/${videoId}/screenshots/${screenshot.filename}`,
+            draw_guidelines: true
+        };
+
+        if (trapezPoints.length === 4) {
+            body.trapez_points = trapezPoints;
+        }
+
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            selectedLensProfile = 'custom';
+            isUndistorted = true;
+
+            const cacheBuster = Date.now();
+            const undistortedImg = document.getElementById('undistorted-preview');
+            undistortedImg.src = `/calibration/screenshot/${videoId}/custom_undistorted.jpg?t=${cacheBuster}`;
+            undistortedImg.classList.remove('hidden');
+            document.getElementById('undistorted-placeholder').classList.add('hidden');
+
+            statusEl.textContent = `k1=${k1.toFixed(3)} k2=${k2.toFixed(3)} k3=${k3.toFixed(3)} k4=${k4.toFixed(3)}`;
+            document.getElementById('step2-next').disabled = false;
+            showPreviewControls();
+        } else {
+            statusEl.textContent = 'Fehler: ' + result.error;
+        }
+    } catch (err) {
+        statusEl.textContent = 'Fehler: ' + err.message;
+    }
+}
+
+// Trapez-Funktionen
+function setupTrapezCanvas() {
+    const img = document.getElementById('undistorted-preview');
+    const canvas = document.getElementById('trapez-canvas');
+
+    // Canvas-Grösse an Bild anpassen wenn geladen
+    img.onload = () => {
+        canvas.width = img.clientWidth;
+        canvas.height = img.clientHeight;
+        canvas.classList.remove('hidden');
+        drawTrapez();
+    };
+}
+
+function toggleTrapezMode() {
+    isTrapezMode = document.getElementById('trapez-mode').checked;
+    const canvas = document.getElementById('trapez-canvas');
+    const container = document.getElementById('undistorted-container');
+    const wrapper = document.getElementById('undistorted-wrapper');
+
+    if (isTrapezMode) {
+        canvas.classList.remove('hidden');
+        container.style.cursor = 'crosshair';
+        wrapper.style.cursor = 'crosshair';
+    } else {
+        container.style.cursor = 'grab';
+        wrapper.style.cursor = 'grab';
+    }
+}
+
+function drawTrapez() {
+    const canvas = document.getElementById('trapez-canvas');
+    const ctx = canvas.getContext('2d');
+    const img = document.getElementById('undistorted-preview');
+
+    if (!img.clientWidth) return;
+
+    const scaleX = img.clientWidth / img.naturalWidth;
+    const scaleY = img.clientHeight / img.naturalHeight;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (trapezPoints.length === 0) return;
+
+    // Punkte zeichnen
+    ctx.fillStyle = '#FF00FF';
+    ctx.strokeStyle = '#FF00FF';
+    ctx.lineWidth = 2;
+
+    for (let i = 0; i < trapezPoints.length; i++) {
+        const [x, y] = trapezPoints[i];
+        const dx = x * scaleX;
+        const dy = y * scaleY;
+
+        ctx.beginPath();
+        ctx.arc(dx, dy, 6, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '12px sans-serif';
+        ctx.fillText(String(i + 1), dx + 8, dy + 4);
+        ctx.fillStyle = '#FF00FF';
+    }
+
+    // Linien zwischen Punkten
+    if (trapezPoints.length >= 2) {
+        ctx.beginPath();
+        ctx.moveTo(trapezPoints[0][0] * scaleX, trapezPoints[0][1] * scaleY);
+
+        for (let i = 1; i < trapezPoints.length; i++) {
+            ctx.lineTo(trapezPoints[i][0] * scaleX, trapezPoints[i][1] * scaleY);
+        }
+
+        if (trapezPoints.length === 4) {
+            ctx.closePath();
+        }
+
+        ctx.stroke();
+    }
+
+    // Fluchtlinien wenn 4 Punkte
+    if (trapezPoints.length === 4) {
+        const [p0, p1, p2, p3] = trapezPoints;
+
+        // Fluchtpunkt berechnen (Schnittpunkt linke und rechte Seite)
+        const vp = lineIntersection(p0, p3, p1, p2);
+
+        if (vp) {
+            ctx.strokeStyle = '#FFFF00';
+            ctx.setLineDash([5, 5]);
+
+            // Linien zum Fluchtpunkt
+            ctx.beginPath();
+            ctx.moveTo(p0[0] * scaleX, p0[1] * scaleY);
+            ctx.lineTo(vp[0] * scaleX, vp[1] * scaleY);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(p1[0] * scaleX, p1[1] * scaleY);
+            ctx.lineTo(vp[0] * scaleX, vp[1] * scaleY);
+            ctx.stroke();
+
+            ctx.setLineDash([]);
+
+            // Fluchtpunkt markieren (wenn im Canvas)
+            if (vp[0] * scaleX >= 0 && vp[0] * scaleX <= canvas.width &&
+                vp[1] * scaleY >= 0 && vp[1] * scaleY <= canvas.height) {
+                ctx.fillStyle = '#00FFFF';
+                ctx.beginPath();
+                ctx.arc(vp[0] * scaleX, vp[1] * scaleY, 8, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#000000';
+                ctx.fillText('VP', vp[0] * scaleX + 10, vp[1] * scaleY + 4);
+            }
+        }
+    }
+}
+
+function lineIntersection(p1, p2, p3, p4) {
+    const [x1, y1] = p1;
+    const [x2, y2] = p2;
+    const [x3, y3] = p3;
+    const [x4, y4] = p4;
+
+    const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+    if (Math.abs(denom) < 1e-10) return null;
+
+    const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
+
+    return [x1 + t * (x2 - x1), y1 + t * (y2 - y1)];
+}
+
+function clearTrapez() {
+    trapezPoints = [];
+    drawTrapez();
+    if (isCustomMode) {
+        updateCustomPreview();
+    }
+}
+
+async function saveCustomProfile() {
+    const name = document.getElementById('custom-profile-name').value.trim();
+    if (!name) {
+        alert('Bitte gib einen Namen für das Profil ein.');
+        return;
+    }
+
+    const baseProfileId = document.getElementById('base-profile-select').value;
+    const k1 = parseFloat(document.getElementById('k1-slider').value);
+    const k2 = parseFloat(document.getElementById('k2-slider').value);
+    const k3 = parseFloat(document.getElementById('k3-slider').value);
+    const k4 = parseFloat(document.getElementById('k4-slider').value);
+    const zoomOut = parseFloat(document.getElementById('zoom-slider').value);
+    const rotation = parseFloat(document.getElementById('rotation-slider').value);
+
+    try {
+        const response = await fetch('/calibration/api/lens-profiles/save-custom', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name,
+                base_profile_id: baseProfileId || null,
+                k1, k2, k3, k4,
+                zoom_out: zoomOut,
+                rotation: rotation
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert(`Profil "${name}" gespeichert!`);
+            // Profile neu laden
+            await loadLensProfiles();
+            // Neues Profil auswählen
+            document.getElementById('lens-profile-select').value = result.id;
+        } else {
+            alert('Fehler: ' + result.error);
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+
+// ========================================
+// PREVIEW ZOOM/PAN
+// ========================================
+
+function setupPreviewZoomPan() {
+    const container = document.getElementById('undistorted-container');
+    const wrapper = document.getElementById('undistorted-wrapper');
+
+    // Mausrad Zoom
+    container.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? 0.9 : 1.1;
+        const newZoom = Math.max(0.5, Math.min(10, previewZoom * delta));
+
+        // Zoom zum Mauszeiger
+        const rect = container.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        // Pan anpassen damit Zoom zum Mauszeiger geht
+        const zoomRatio = newZoom / previewZoom;
+        previewPanX = mouseX - (mouseX - previewPanX) * zoomRatio;
+        previewPanY = mouseY - (mouseY - previewPanY) * zoomRatio;
+
+        previewZoom = newZoom;
+        updatePreviewTransform();
+    });
+
+    // Pan mit Maus ziehen (nur wenn NICHT im Trapez-Modus)
+    container.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return; // Nur linke Maustaste
+        if (isTrapezMode) return; // Nicht während Trapez-Modus
+
+        isPanning = true;
+        panStartX = e.clientX - previewPanX;
+        panStartY = e.clientY - previewPanY;
+        wrapper.style.cursor = 'grabbing';
+        e.preventDefault();
+    });
+
+    // Trapez-Punkte setzen (im Trapez-Modus)
+    container.addEventListener('click', (e) => {
+        if (!isTrapezMode || !isCustomMode) return;
+
+        const img = document.getElementById('undistorted-preview');
+        const rect = img.getBoundingClientRect();
+        const scaleX = img.naturalWidth / img.clientWidth;
+        const scaleY = img.naturalHeight / img.clientHeight;
+
+        // Berücksichtige Zoom und Pan
+        const x = ((e.clientX - rect.left) / previewZoom) * scaleX;
+        const y = ((e.clientY - rect.top) / previewZoom) * scaleY;
+
+        if (trapezPoints.length < 4) {
+            trapezPoints.push([x, y]);
+            drawTrapez();
+
+            if (trapezPoints.length === 4) {
+                updateCustomPreview();
+            }
+        }
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isPanning) return;
+        previewPanX = e.clientX - panStartX;
+        previewPanY = e.clientY - panStartY;
+        updatePreviewTransform();
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isPanning) {
+            isPanning = false;
+            const wrapper = document.getElementById('undistorted-wrapper');
+            if (wrapper) wrapper.style.cursor = 'grab';
+        }
+    });
+}
+
+function updatePreviewTransform() {
+    const wrapper = document.getElementById('undistorted-wrapper');
+    wrapper.style.transform = `translate(${previewPanX}px, ${previewPanY}px) scale(${previewZoom})`;
+    document.getElementById('preview-zoom-level').textContent = Math.round(previewZoom * 100) + '%';
+}
+
+function previewZoomIn() {
+    previewZoom = Math.min(10, previewZoom * 1.25);
+    updatePreviewTransform();
+}
+
+function previewZoomOut() {
+    previewZoom = Math.max(0.5, previewZoom / 1.25);
+    updatePreviewTransform();
+}
+
+function previewZoomReset() {
+    previewZoom = 1;
+    previewPanX = 0;
+    previewPanY = 0;
+    updatePreviewTransform();
+}
+
+function showPreviewControls() {
+    document.getElementById('preview-zoom-controls').style.display = 'flex';
+    document.getElementById('preview-zoom-hint').style.display = 'block';
+}
+
+async function undistortImage() {
+    const lensProfileId = document.getElementById('lens-profile-select').value;
+
+    // Custom-Modus
+    if (lensProfileId === 'custom') {
+        await doCustomUndistort();
+        return;
+    }
+
+    if (!lensProfileId) {
+        alert('Bitte wähle ein Lens-Profil aus.');
+        return;
+    }
+
+    const screenshot = screenshots[activeScreenshotIndex];
+    const zoomOut = parseFloat(document.getElementById('zoom-slider').value);
+    const statusEl = document.getElementById('undistort-status');
+
+    statusEl.textContent = 'Entzerrung läuft...';
+    document.getElementById('undistort-btn').disabled = true;
+
+    try {
+        const response = await fetch(`/calibration/api/videos/${videoId}/undistort-screenshot`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                lens_profile_id: lensProfileId,
+                screenshot_path: `data/calibration/${videoId}/screenshots/${screenshot.filename}`,
+                balance: 1.0,
+                zoom_out: zoomOut
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            selectedLensProfile = lensProfileId;
+            isUndistorted = true;
+
+            const cacheBuster = Date.now();
+            const undistortedImg = document.getElementById('undistorted-preview');
+            undistortedImg.src = `/calibration/screenshot/${videoId}/undistorted_frame.jpg?t=${cacheBuster}`;
+            undistortedImg.classList.remove('hidden');
+            document.getElementById('undistorted-placeholder').classList.add('hidden');
+
+            statusEl.textContent = 'Entzerrt!';
+            document.getElementById('step2-next').disabled = false;
+            showPreviewControls();
+        } else {
+            statusEl.textContent = 'Fehler: ' + result.error;
+        }
+    } catch (err) {
+        statusEl.textContent = 'Fehler: ' + err.message;
+    } finally {
+        document.getElementById('undistort-btn').disabled = false;
+    }
+}
+
+function confirmStep2() {
+    if (!isUndistorted) {
+        alert('Bitte entzerze zuerst das Bild.');
+        return;
+    }
+
+    // Entzerrungs-Parameter speichern für Step 3
+    saveUndistortParams();
+
+    // WIP speichern
+    saveWipData();
+
+    // Canvas-Objekte initialisieren mit entzerrtem Bild
+    initializeCanvasesWithUndistorted();
+    goToStep(3);
+}
+
+function saveUndistortParams() {
+    savedUndistortParams.lensProfileId = document.getElementById('lens-profile-select').value;
+    savedUndistortParams.isCustom = savedUndistortParams.lensProfileId === 'custom';
+
+    if (savedUndistortParams.isCustom) {
+        savedUndistortParams.baseProfileId = document.getElementById('base-profile-select').value || null;
+        savedUndistortParams.k1 = parseFloat(document.getElementById('k1-slider').value);
+        savedUndistortParams.k2 = parseFloat(document.getElementById('k2-slider').value);
+        savedUndistortParams.k3 = parseFloat(document.getElementById('k3-slider').value);
+        savedUndistortParams.k4 = parseFloat(document.getElementById('k4-slider').value);
+    } else {
+        savedUndistortParams.baseProfileId = null;
+        savedUndistortParams.k1 = null;
+        savedUndistortParams.k2 = null;
+        savedUndistortParams.k3 = null;
+        savedUndistortParams.k4 = null;
+    }
+
+    savedUndistortParams.zoomOut = parseFloat(document.getElementById('zoom-slider').value);
+    savedUndistortParams.rotation = parseFloat(document.getElementById('rotation-slider').value);
+
+    console.log('Saved undistort params:', savedUndistortParams);
+}
+
+// ========================================
+// STEP 3: SET POINTS
+// ========================================
+
+async function initializeCanvasesWithUndistorted() {
+    // Image Canvas mit CalibrationCanvas
+    imageCanvas = new CalibrationCanvas('image-canvas', {
+        mode: 'points',
+        pointColor: '#FF6B00',
+        onPointAdded: onImagePointAdded,
+        onPointRemoved: onImagePointRemoved
+    });
+
+    // Entzerrtes Bild generieren und laden
+    await generateUndistortedForStep3(activeScreenshotIndex);
+
+    // Field Canvas mit FieldCanvas (offizielles SVG)
+    fieldCanvas = new FieldCanvas('field-canvas', {
+        fieldLength: 40,
+        fieldWidth: 20,
+        pointColor: '#FF6B00',
+        onPointAdded: onFieldPointAdded,
+        onPointRemoved: onFieldPointRemoved,
+        svgUrl: '/static/images/Floorball_rink1.svg'
+    });
+    fieldCanvas.render();
+
+    // Screenshot-Selector befüllen
+    renderScreenshotSelector();
+
+    // Wiederhergestellte Punkte in den Canvas laden (falls vorhanden)
+    if (pointPairs.length > 0) {
+        restorePointsToCanvases();
+    }
+}
+
+function restorePointsToCanvases() {
+    // Punkte aus pointPairs in die Canvas-Objekte laden
+    for (const pair of pointPairs) {
+        // Image Canvas Punkt hinzufügen
+        if (imageCanvas) {
+            imageCanvas.addPoint(pair.image.x, pair.image.y);
+        }
+        // Field Canvas Punkt hinzufügen
+        if (fieldCanvas) {
+            fieldCanvas.addPoint(pair.field.x, pair.field.y);
+        }
+    }
+
+    // UI aktualisieren
+    updatePointCounts();
+    updatePointPairsList();
+
+    console.log('Restored', pointPairs.length, 'point pairs to canvases');
+}
+
+async function generateUndistortedForStep3(screenshotIndex) {
+    const screenshot = screenshots[screenshotIndex];
+    const params = savedUndistortParams;
+
+    let endpoint, body;
+
+    if (params.isCustom) {
+        // Custom-Entzerrung
+        endpoint = `/calibration/api/videos/${videoId}/custom-undistort`;
+        body = {
+            base_profile_id: params.baseProfileId,
+            k1: params.k1,
+            k2: params.k2,
+            k3: params.k3,
+            k4: params.k4,
+            zoom_out: params.zoomOut,
+            rotation: params.rotation,
+            screenshot_path: `data/calibration/${videoId}/screenshots/${screenshot.filename}`,
+            draw_guidelines: false  // Keine Hilfslinien für Step 3
+        };
+    } else {
+        // Standard-Lens-Profil (inkl. gespeicherte Custom-Profile)
+        endpoint = `/calibration/api/videos/${videoId}/undistort-screenshot`;
+        body = {
+            lens_profile_id: params.lensProfileId,
+            screenshot_path: `data/calibration/${videoId}/screenshots/${screenshot.filename}`,
+            balance: 1.0,
+            zoom_out: params.zoomOut,
+            rotation: params.rotation  // Auch für Standard-Profile übergeben
+        };
+    }
+
+    try {
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            // Entzerrtes Bild laden - je nach Modus unterschiedlicher Pfad
+            const imgPath = params.isCustom ? 'custom_undistorted.jpg' : 'undistorted_frame.jpg';
+            const imgUrl = `/calibration/screenshot/${videoId}/${imgPath}?t=${Date.now()}`;
+            imageCanvas.loadImage(imgUrl);
+        } else {
+            console.error('Fehler beim Entzerren:', result.error);
+        }
+    } catch (err) {
+        console.error('Fehler beim Entzerren:', err);
+    }
+}
+
+function renderScreenshotSelector() {
+    const container = document.getElementById('screenshot-selector');
+    container.innerHTML = '';
+
+    // Nur ausgewählte Screenshots anzeigen
+    selectedScreenshotIndices.forEach((index, selectorIndex) => {
+        const screenshot = screenshots[index];
+        const isActive = activeScreenshotIndex === index;
+        const div = document.createElement('div');
+        div.className = `cursor-pointer rounded overflow-hidden border-2 flex-shrink-0 ${
+            isActive ? 'border-blue-500 ring-2 ring-blue-300' : 'border-gray-300'
+        }`;
+        div.innerHTML = `
+            <img src="/calibration/screenshot/${videoId}/screenshots/${screenshot.filename}"
+                 class="w-16 h-10 object-cover">
+            <div class="text-center text-xs ${isActive ? 'bg-blue-500 text-white' : 'bg-gray-200'}">${selectorIndex + 1}</div>
+        `;
+        div.onclick = () => switchScreenshot(index);
+
+        // Hover-Vorschau
+        div.onmouseenter = (e) => startHoverPreview(e, index);
+        div.onmousemove = (e) => moveHoverPreview(e);
+        div.onmouseleave = () => hideHoverPreview();
+
+        container.appendChild(div);
+    });
+}
+
+async function switchScreenshot(index) {
+    if (index === activeScreenshotIndex) return;
+
+    activeScreenshotIndex = index;
+    renderScreenshotSelector();
+
+    // Entzerrtes Bild mit gespeicherten Parametern neu generieren
+    await generateUndistortedForStep3(index);
+}
+
+function onImagePointAdded(count, pos) {
+    pendingImagePoint = pos;
+    updatePointCounts();
+}
+
+function onImagePointRemoved(count) {
+    pendingImagePoint = null;
+    updatePointCounts();
+}
+
+function onFieldPointAdded(count, pos, refName) {
+    if (!pendingImagePoint) {
+        // Kein Bild-Punkt ausgewählt - Punkt wieder entfernen
+        fieldCanvas.removeLastPoint();
+        alert('Setze zuerst einen Punkt im Bild (links).');
+        return;
+    }
+
+    // Punkt-Paar speichern
+    pointPairs.push({
+        image: { x: pendingImagePoint.x, y: pendingImagePoint.y },
+        field: { x: pos.x, y: pos.y },
+        fieldName: refName || `(${pos.x}, ${pos.y})`
+    });
+
+    pendingImagePoint = null;
+
+    // Sync: Bild-Canvas hat bereits den Punkt, Field-Canvas auch
+    updatePointCounts();
+    updatePointPairsList();
+
+    // WIP speichern nach jedem neuen Punkt-Paar
+    saveWipData();
+}
+
+function onFieldPointRemoved(count) {
+    updatePointCounts();
+}
+
+function updatePointCounts() {
+    const imgCount = imageCanvas ? imageCanvas.getPoints().length : 0;
+    const fieldCount = fieldCanvas ? fieldCanvas.getPoints().length : 0;
+
+    document.getElementById('image-point-count').textContent = `${imgCount} Punkte`;
+    document.getElementById('field-point-count').textContent = `${fieldCount} Punkte`;
+    document.getElementById('pairs-count').textContent = pointPairs.length;
+    document.getElementById('step3-next').disabled = pointPairs.length < 4;
+}
+
+function updatePointPairsList() {
+    const container = document.getElementById('point-pairs-list');
+
+    if (pointPairs.length === 0) {
+        container.innerHTML = '<span class="text-gray-400 text-sm">Noch keine Punkte gesetzt</span>';
+        return;
+    }
+
+    container.innerHTML = pointPairs.map((pair, i) => `
+        <span class="point-pair-chip" onclick="removePointPair(${i})" title="Klick zum Entfernen">
+            ${i + 1}: (${Math.round(pair.image.x)}, ${Math.round(pair.image.y)}) → ${pair.fieldName}
+        </span>
+    `).join('');
+}
+
+function removePointPair(index) {
+    pointPairs.splice(index, 1);
+
+    // Canvas-Punkte synchronisieren
+    if (imageCanvas) {
+        imageCanvas.removePointAtIndex(index);
+    }
+    if (fieldCanvas) {
+        fieldCanvas.removePointAtIndex(index);
+    }
+
+    updatePointCounts();
+    updatePointPairsList();
+
+    // WIP speichern
+    saveWipData();
+}
+
+// Letzten Bild-Punkt entfernen
+function removeLastImagePoint() {
+    if (imageCanvas && imageCanvas.getPoints().length > 0) {
+        imageCanvas.removeLastPoint();
+        // Wenn wir einen pending Punkt hatten, diesen auch entfernen
+        if (pendingImagePoint) {
+            pendingImagePoint = null;
+        } else if (pointPairs.length > 0) {
+            // Letztes Punkt-Paar entfernen und Field-Punkt auch
+            pointPairs.pop();
+            if (fieldCanvas) {
+                fieldCanvas.removeLastPoint();
+            }
+            updatePointPairsList();
+        }
+        updatePointCounts();
+    }
+}
+
+// Letzten Spielfeld-Punkt entfernen
+function removeLastFieldPoint() {
+    if (fieldCanvas && fieldCanvas.getPoints().length > 0) {
+        fieldCanvas.removeLastPoint();
+        // Auch das zugehörige Punkt-Paar entfernen
+        if (pointPairs.length > 0) {
+            pointPairs.pop();
+            if (imageCanvas) {
+                imageCanvas.removeLastPoint();
+            }
+            updatePointPairsList();
+        }
+        updatePointCounts();
+    }
+}
+
+// Zoom Controls
+function zoomIn() {
+    if (imageCanvas) {
+        imageCanvas.scale *= 1.2;
+        imageCanvas.render();
+        updateZoomLevel();
+    }
+}
+
+function zoomOut() {
+    if (imageCanvas) {
+        imageCanvas.scale *= 0.8;
+        imageCanvas.render();
+        updateZoomLevel();
+    }
+}
+
+function resetView() {
+    if (imageCanvas) {
+        imageCanvas._fitImageToCanvas();
+        imageCanvas.render();
+        updateZoomLevel();
+    }
+}
+
+function updateZoomLevel() {
+    if (imageCanvas) {
+        document.getElementById('zoom-level').textContent = Math.round(imageCanvas.scale * 100) + '%';
+    }
+}
+
+async function confirmStep3() {
+    if (pointPairs.length < 4) {
+        alert('Mindestens 4 Punkt-Paare erforderlich.');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/calibration/api/videos/${videoId}/calibration/preview`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                point_pairs: pointPairs,
+                use_undistorted: true
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            document.getElementById('overlay-undistorted').src =
+                `/calibration/screenshot/${videoId}/test_overlay.jpg?t=${Date.now()}`;
+            goToStep(4);
+        } else {
+            alert('Fehler: ' + result.error);
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+
+// ========================================
+// STEP 4: VERIFY ON UNDISTORTED
+// ========================================
+
+function confirmStep4() {
+    generateDistortedOverlay();
+}
+
+async function generateDistortedOverlay() {
+    let screenshotFilename = null;
+    if (activeScreenshotIndex !== null && screenshots[activeScreenshotIndex]) {
+        screenshotFilename = screenshots[activeScreenshotIndex].filename;
+    }
+
+    // Request-Body aufbauen
+    const requestBody = {
+        point_pairs: pointPairs,
+        lens_profile_id: selectedLensProfile,
+        screenshot_filename: screenshotFilename
+    };
+
+    // IMMER undistort_params hinzufügen für korrekte Rücktransformation
+    requestBody.undistort_params = {
+        is_custom: savedUndistortParams.isCustom,
+        base_profile_id: savedUndistortParams.baseProfileId,
+        k1: savedUndistortParams.k1,
+        k2: savedUndistortParams.k2,
+        k3: savedUndistortParams.k3,
+        k4: savedUndistortParams.k4,
+        zoom_out: savedUndistortParams.zoomOut,
+        rotation: savedUndistortParams.rotation
+    };
+
+    console.log('Sending distorted-overlay request with undistort_params:', requestBody.undistort_params);
+
+    try {
+        const response = await fetch(`/calibration/api/videos/${videoId}/calibration/distorted-overlay`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            document.getElementById('overlay-distorted').src =
+                `/calibration/screenshot/${videoId}/distorted_overlay.jpg?t=${Date.now()}`;
+            goToStep(5);
+        } else {
+            alert('Fehler: ' + result.error);
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+
+// ========================================
+// STEP 5: SAVE
+// ========================================
+
+async function saveCalibration() {
+    const name = document.getElementById('calibration-name').value.trim() || 'Kalibrierung';
+
+    // Request-Body aufbauen
+    const requestBody = {
+        point_pairs: pointPairs,
+        use_undistorted: true,
+        lens_profile_id: selectedLensProfile,
+        name: name
+    };
+
+    // Undistort-Parameter für Reproduzierbarkeit hinzufügen
+    requestBody.undistort_params = {
+        is_custom: savedUndistortParams.isCustom,
+        lens_profile_id: savedUndistortParams.lensProfileId,
+        base_profile_id: savedUndistortParams.baseProfileId,
+        k1: savedUndistortParams.k1,
+        k2: savedUndistortParams.k2,
+        k3: savedUndistortParams.k3,
+        k4: savedUndistortParams.k4,
+        zoom_out: savedUndistortParams.zoomOut,
+        rotation: savedUndistortParams.rotation
+    };
+
+    try {
+        const response = await fetch(`/calibration/api/videos/${videoId}/calibration/save`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // WIP-Daten löschen nach erfolgreichem Speichern
+            await deleteWipData();
+
+            alert('Kalibrierung gespeichert!\n\nJSON exportiert nach:\n' + (result.json_path || 'data/calibration/'));
+            window.location.href = '{{ url_for("calibration.index") }}';
+        } else {
+            alert('Fehler: ' + result.error);
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+</script>
+{% endblock %}

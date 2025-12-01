@@ -75,6 +75,25 @@ def quick_calibration(video_id):
     )
 
 
+@calibration_bp.route("/video/<video_id>/simple")
+def simple_calibration(video_id):
+    """Neue vereinfachte Kalibrierung mit 5-Schritt-Workflow."""
+    video = db.session.get(Video, video_id)
+    if not video:
+        abort(404)
+
+    calibration = db.session.query(Calibration).filter_by(
+        video_id=video.id,
+        is_active=True
+    ).first()
+
+    return render_template(
+        "calibration/simple.html",
+        video=video,
+        calibration=calibration
+    )
+
+
 @calibration_bp.route("/lens/checkerboard")
 def checkerboard_fullscreen():
     """Fullscreen Schachbrett zum Fotografieren."""
@@ -1171,21 +1190,67 @@ def api_undistort_screenshot(video_id):
                 (w, h)
             )
 
-        # Bild entzerren mit zoom_out für Ecken
-        undistorted = undistort_image(
-            img,
-            camera_matrix,
-            distortion_coeffs,
-            balance=balance,
-            zoom_out=zoom_out
+        # Prüfen ob es ein Custom-Profil ist (manuelle Anpassung oder geschätzt)
+        # Profile mit "Manuelle Anpassung" oder "estimated: true" verwenden die direkte Methode
+        is_custom_profile = (
+            profile.get("source") == "Manuelle Anpassung" or
+            profile.get("estimated") == True
         )
+
+        # Rotation aus Request lesen (falls übergeben)
+        rotation = data.get("rotation", 0.0)
+
+        if is_custom_profile:
+            # Custom-Profile: zoom_out und rotation aus Profil lesen (falls nicht überschrieben)
+            undistort_params = profile.get("undistort_params", {})
+            profile_zoom = undistort_params.get("zoom_out", 1.2)
+            profile_rotation = undistort_params.get("rotation", 0.0)
+
+            # Request-Parameter überschreiben Profil-Parameter nur wenn explizit angegeben
+            effective_zoom = zoom_out if zoom_out != 1.2 else profile_zoom
+            # Rotation: Request-Wert hat Vorrang, sonst Profil-Wert
+            effective_rotation = rotation if rotation != 0.0 else profile_rotation
+
+            # Custom-Profile verwenden die gleiche Methode wie beim Erstellen
+            # Zoom durch Anpassung der Brennweite, Bildgrösse bleibt gleich
+            new_K = camera_matrix.copy()
+            new_K[0, 0] /= effective_zoom
+            new_K[1, 1] /= effective_zoom
+
+            map1, map2 = cv2.fisheye.initUndistortRectifyMap(
+                camera_matrix, distortion_coeffs,
+                np.eye(3), new_K,
+                (w, h), cv2.CV_16SC2
+            )
+
+            undistorted = cv2.remap(img, map1, map2, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+
+            # Rotation anwenden (falls nicht 0)
+            if abs(effective_rotation) > 0.01:
+                center = (w / 2, h / 2)
+                rotation_matrix = cv2.getRotationMatrix2D(center, effective_rotation, 1.0)
+                undistorted = cv2.warpAffine(undistorted, rotation_matrix, (w, h),
+                                             flags=cv2.INTER_LINEAR,
+                                             borderMode=cv2.BORDER_CONSTANT,
+                                             borderValue=(0, 0, 0))
+
+            undist_h, undist_w = h, w
+            zoom_out = effective_zoom  # Für Response
+        else:
+            # Standard-Profile verwenden die balance-Methode
+            undistorted = undistort_image(
+                img,
+                camera_matrix,
+                distortion_coeffs,
+                balance=balance,
+                zoom_out=zoom_out
+            )
+            undist_h, undist_w = undistorted.shape[:2]
 
         # Speichern
         output_path = calibration_dir / "undistorted_frame.jpg"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(output_path), undistorted)
-
-        undist_h, undist_w = undistorted.shape[:2]
 
         return jsonify({
             "success": True,
@@ -1195,7 +1260,8 @@ def api_undistort_screenshot(video_id):
             "original_size": [w, h],
             "undistorted_size": [undist_w, undist_h],
             "zoom_out": zoom_out,
-            "balance": balance
+            "balance": balance,
+            "is_custom_profile": is_custom_profile
         })
 
     except Exception as e:
@@ -1738,6 +1804,89 @@ def api_calibration_preview(video_id):
         return jsonify({"error": str(e)}), 500
 
 
+# === Work-in-Progress (WIP) Speicherung ===
+
+@calibration_bp.route("/api/videos/<video_id>/calibration/wip", methods=["GET"])
+def api_get_calibration_wip(video_id):
+    """
+    Lädt Work-in-Progress Kalibrierungsdaten.
+    """
+    import json
+
+    video = db.session.get(Video, video_id)
+    if not video:
+        return jsonify({"error": "Video nicht gefunden"}), 404
+
+    wip_path = PROJECT_ROOT / "data" / "calibration" / video_id / "wip_calibration.json"
+
+    if not wip_path.exists():
+        return jsonify({"exists": False})
+
+    try:
+        with open(wip_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return jsonify({"exists": True, "data": data})
+    except Exception as e:
+        return jsonify({"exists": False, "error": str(e)})
+
+
+@calibration_bp.route("/api/videos/<video_id>/calibration/wip", methods=["POST"])
+def api_save_calibration_wip(video_id):
+    """
+    Speichert Work-in-Progress Kalibrierungsdaten.
+
+    JSON Body:
+        point_pairs: Liste von Punkt-Paaren
+        undistort_params: Entzerrungs-Parameter
+        selected_screenshots: Ausgewählte Screenshot-Indizes
+        active_screenshot: Aktueller Screenshot-Index
+        current_step: Aktueller Schritt
+    """
+    import json
+    from datetime import datetime
+
+    video = db.session.get(Video, video_id)
+    if not video:
+        return jsonify({"error": "Video nicht gefunden"}), 404
+
+    data = request.get_json() or {}
+
+    wip_data = {
+        "video_id": video_id,
+        "updated_at": datetime.now().isoformat(),
+        "point_pairs": data.get("point_pairs", []),
+        "undistort_params": data.get("undistort_params", {}),
+        "selected_screenshots": data.get("selected_screenshots", []),
+        "active_screenshot": data.get("active_screenshot"),
+        "current_step": data.get("current_step", 1)
+    }
+
+    calibration_dir = PROJECT_ROOT / "data" / "calibration" / video_id
+    calibration_dir.mkdir(parents=True, exist_ok=True)
+
+    wip_path = calibration_dir / "wip_calibration.json"
+
+    try:
+        with open(wip_path, "w", encoding="utf-8") as f:
+            json.dump(wip_data, f, indent=2, ensure_ascii=False)
+        return jsonify({"success": True, "path": str(wip_path)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@calibration_bp.route("/api/videos/<video_id>/calibration/wip", methods=["DELETE"])
+def api_delete_calibration_wip(video_id):
+    """
+    Löscht Work-in-Progress Kalibrierungsdaten (nach erfolgreichem Speichern).
+    """
+    wip_path = PROJECT_ROOT / "data" / "calibration" / video_id / "wip_calibration.json"
+
+    if wip_path.exists():
+        wip_path.unlink()
+
+    return jsonify({"success": True})
+
+
 @calibration_bp.route("/api/videos/<video_id>/calibration/save", methods=["POST"])
 def api_calibration_save(video_id):
     """
@@ -1747,6 +1896,8 @@ def api_calibration_save(video_id):
         point_pairs: Liste von {image: {x,y}, field: {x,y}}
         use_undistorted: Boolean
         lens_profile_id: Optional
+        undistort_params: Optional - Custom Entzerrungs-Parameter
+        name: Optional - Name der Kalibrierung
 
     Returns:
         success: Boolean
@@ -1754,6 +1905,7 @@ def api_calibration_save(video_id):
     """
     import cv2
     import numpy as np
+    import json
 
     video = db.session.get(Video, video_id)
     if not video:
@@ -1763,6 +1915,8 @@ def api_calibration_save(video_id):
     point_pairs = data.get("point_pairs", [])
     use_undistorted = data.get("use_undistorted", True)
     lens_profile_id = data.get("lens_profile_id")
+    undistort_params = data.get("undistort_params", {})
+    name = data.get("name", "Kalibrierung")
 
     if len(point_pairs) < 4:
         return jsonify({"error": "Mindestens 4 Punkt-Paare erforderlich"}), 400
@@ -1784,25 +1938,47 @@ def api_calibration_save(video_id):
             is_active=True
         ).update({"is_active": False})
 
+        # Kalibrierungsdaten zusammenstellen
+        calibration_data = {
+            "name": name,
+            "point_pairs": point_pairs,
+            "homography_matrix": homography.tolist(),
+            "use_undistorted": use_undistorted,
+            "lens_profile_id": lens_profile_id,
+            "image_points": image_pts.tolist(),
+            "field_points": field_pts.tolist()
+        }
+
+        # Undistort-Parameter hinzufügen (für Reproduzierbarkeit)
+        if undistort_params:
+            calibration_data["undistort_params"] = undistort_params
+
         # Neue Kalibrierung erstellen
         calibration = Calibration(
             video_id=video.id,
             is_active=True,
-            calibration_data={
-                "point_pairs": point_pairs,
-                "homography_matrix": homography.tolist(),
-                "use_undistorted": use_undistorted,
-                "lens_profile_id": lens_profile_id,
-                "image_points": image_pts.tolist(),
-                "field_points": field_pts.tolist()
-            }
+            calibration_data=calibration_data
         )
         db.session.add(calibration)
         db.session.commit()
 
+        # JSON-Datei speichern für einfachen Zugriff/Export
+        calibration_dir = PROJECT_ROOT / "data" / "calibration" / video_id
+        calibration_dir.mkdir(parents=True, exist_ok=True)
+
+        json_path = calibration_dir / f"calibration_{calibration.id}.json"
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "id": str(calibration.id),
+                "video_id": video_id,
+                "created_at": calibration.created_at.isoformat() if calibration.created_at else None,
+                **calibration_data
+            }, f, indent=2, ensure_ascii=False)
+
         return jsonify({
             "success": True,
-            "calibration_id": str(calibration.id)
+            "calibration_id": str(calibration.id),
+            "json_path": str(json_path)
         })
 
     except Exception as e:
@@ -1813,7 +1989,799 @@ def api_calibration_save(video_id):
         return jsonify({"error": str(e)}), 500
 
 
+# === Distorted Overlay API ===
+
+@calibration_bp.route("/api/videos/<video_id>/calibration/distorted-overlay", methods=["POST"])
+def api_distorted_overlay(video_id):
+    """
+    Generiert ein Overlay auf dem VERZERRTEN (Original) Bild.
+
+    Der Workflow:
+    1. Punkt-Paare definieren die Homographie (auf dem entzerrten Bild)
+    2. Spielfeld-Linien werden in viele kurze Segmente unterteilt
+    3. Jeder Punkt wird mit der inversen Homographie auf Bildkoordinaten transformiert
+    4. Dann mit der Lens-Distortion wieder verzerrt
+    5. Das Ergebnis sind gekrümmte Linien auf dem Original-Bild
+
+    JSON Body:
+        point_pairs: Liste von {image: {x,y}, field: {x,y}}
+        lens_profile_id: ID des Lens-Profils ODER "custom"
+        undistort_params: (optional) Custom-Parameter wenn lens_profile_id="custom"
+            - base_profile_id: Basis-Profil für Kameramatrix
+            - k1, k2, k3, k4: Distortion-Koeffizienten
+            - zoom_out, rotation: Entzerrungs-Parameter
+
+    Returns:
+        success: Boolean
+        overlay_path: Pfad zum generierten Overlay
+    """
+    import cv2
+    import numpy as np
+    from src.processing.calibration import load_lens_profile, scale_camera_matrix, distort_points
+
+    video = db.session.get(Video, video_id)
+    if not video:
+        return jsonify({"error": "Video nicht gefunden"}), 404
+
+    data = request.get_json() or {}
+    point_pairs = data.get("point_pairs", [])
+    lens_profile_id = data.get("lens_profile_id")
+    screenshot_filename = data.get("screenshot_filename")
+    undistort_params = data.get("undistort_params", {})
+
+    if len(point_pairs) < 4:
+        return jsonify({"error": "Mindestens 4 Punkt-Paare erforderlich"}), 400
+
+    # Prüfen ob Custom-Modus oder Profil
+    is_custom_mode = lens_profile_id == "custom"
+
+    if not lens_profile_id and not is_custom_mode:
+        return jsonify({"error": "lens_profile_id erforderlich für Rücktransformation"}), 400
+
+    calibration_dir = PROJECT_ROOT / "data" / "calibration" / video_id
+
+    # Original (verzerrtes) Bild laden
+    original_path = None
+
+    # Zuerst: Wenn ein spezifischer Screenshot angegeben wurde
+    if screenshot_filename:
+        candidate_path = calibration_dir / "screenshots" / screenshot_filename
+        if candidate_path.exists():
+            original_path = candidate_path
+
+    # Fallback auf andere Screenshots
+    if not original_path:
+        for candidate in ["screenshots/frame_0000.jpg", "calibration_frame.jpg"]:
+            candidate_path = calibration_dir / candidate
+            if candidate_path.exists():
+                original_path = candidate_path
+                break
+
+    # Letzter Fallback: Erster verfügbarer Screenshot
+    if not original_path:
+        screenshot_files = list((calibration_dir / "screenshots").glob("frame_*.jpg"))
+        if screenshot_files:
+            original_path = sorted(screenshot_files)[0]
+
+    if not original_path or not original_path.exists():
+        return jsonify({"error": "Original-Screenshot nicht gefunden"}), 404
+
+    # Lens-Profil/Parameter laden
+    profile = None
+    if is_custom_mode:
+        # Custom-Modus: Lade Basis-Profil für Kameramatrix, verwende Custom-Koeffizienten
+        base_profile_id = undistort_params.get("base_profile_id")
+        if base_profile_id:
+            profile = load_lens_profile(base_profile_id)
+        if not profile:
+            # Fallback: Standard GoPro Profil
+            profile = load_lens_profile("hero10_standard_wide_4k")
+        if not profile:
+            return jsonify({"error": "Kein Basis-Profil für Custom-Modus gefunden"}), 404
+
+        # Custom k1-k4 Koeffizienten überschreiben
+        k1 = undistort_params.get("k1", 0.15)
+        k2 = undistort_params.get("k2", -0.15)
+        k3 = undistort_params.get("k3", 0.1)
+        k4 = undistort_params.get("k4", -0.04)
+        profile["fisheye_params"]["distortion_coeffs"] = [k1, k2, k3, k4]
+    else:
+        profile = load_lens_profile(lens_profile_id)
+        if not profile:
+            return jsonify({"error": f"Lens-Profil '{lens_profile_id}' nicht gefunden"}), 404
+
+    try:
+        # Original-Bild laden
+        img = cv2.imread(str(original_path))
+        if img is None:
+            return jsonify({"error": "Bild konnte nicht geladen werden"}), 500
+
+        h, w = img.shape[:2]
+
+        # Kameramatrix und Distortion aus Profil
+        fisheye_params = profile.get("fisheye_params", {})
+        camera_matrix = np.array(fisheye_params.get("camera_matrix"), dtype=np.float64)
+        distortion_coeffs = np.array(fisheye_params.get("distortion_coeffs"), dtype=np.float64)
+
+        if distortion_coeffs.ndim == 1:
+            distortion_coeffs = distortion_coeffs.reshape(4, 1)
+
+        # Skalieren falls nötig
+        profile_res = profile.get("resolution", {})
+        profile_w = profile_res.get("width", w)
+        profile_h = profile_res.get("height", h)
+
+        if profile_w != w or profile_h != h:
+            camera_matrix = scale_camera_matrix(
+                camera_matrix,
+                (profile_w, profile_h),
+                (w, h)
+            )
+
+        # Homography berechnen (auf entzerrtem Bild-Koordinaten)
+        image_pts = np.array([[p["image"]["x"], p["image"]["y"]] for p in point_pairs], dtype=np.float32)
+        field_pts = np.array([[p["field"]["x"], p["field"]["y"]] for p in point_pairs], dtype=np.float32)
+
+        homography, _ = cv2.findHomography(image_pts, field_pts, cv2.RANSAC, 5.0)
+        if homography is None:
+            return jsonify({"error": "Homography konnte nicht berechnet werden"}), 500
+
+        homography_inv = np.linalg.inv(homography)
+
+        # Spielfeld-Dimensionen
+        FIELD_W, FIELD_H = 40, 20
+        SEGMENT_LENGTH = 0.5  # Meter pro Segment (kurz für glatte Kurven)
+
+        overlay = img.copy()
+
+        # Zoom und Rotation aus undistort_params holen (IMMER, nicht nur Custom-Modus)
+        # Priorität: 1. Request undistort_params, 2. Profil undistort_params, 3. Defaults
+        zoom_out = 1.2
+        rotation = 0.0
+
+        # Aus Request-undistort_params
+        if undistort_params:
+            zoom_out = undistort_params.get("zoom_out", zoom_out)
+            rotation = undistort_params.get("rotation", rotation)
+
+        # Fallback: Aus Profil (falls nicht im Request)
+        if profile.get("undistort_params"):
+            if "zoom_out" not in undistort_params or undistort_params.get("zoom_out") is None:
+                zoom_out = profile["undistort_params"].get("zoom_out", zoom_out)
+            if "rotation" not in undistort_params or undistort_params.get("rotation") is None:
+                rotation = profile["undistort_params"].get("rotation", rotation)
+
+        print(f"Distorted overlay: zoom_out={zoom_out}, rotation={rotation}")
+
+        # Die "gezoomed" Kameramatrix, die für die Entzerrung verwendet wurde
+        zoomed_K = camera_matrix.copy()
+        zoomed_K[0, 0] /= zoom_out
+        zoomed_K[1, 1] /= zoom_out
+
+        def transform_and_distort_line(field_points):
+            """
+            Transformiert Feldpunkte zu Bildpunkten und wendet Distortion an.
+
+            Der Workflow (WICHTIG - Reihenfolge ist kritisch!):
+            Bei der Entzerrung passierte: Original → Undistort → Rotate
+            Bei der Rücktransformation muss es sein: Rotate⁻¹ → Distort
+
+            1. Feldpunkte → entzerrte Bildpunkte (via inverse Homographie)
+               Diese Punkte sind im rotierten, entzerrten Koordinatensystem
+            2. Rotation rückgängig machen (ZUERST!)
+               Jetzt sind die Punkte im nicht-rotierten, entzerrten System
+            3. Von gezoomter zu originaler Kameramatrix konvertieren
+            4. Fisheye-Verzerrung anwenden
+            """
+            # Feld → Bild (entzerrt + rotiert, mit Zoom)
+            field_pts_arr = np.array([[[p[0], p[1]]] for p in field_points], dtype=np.float32)
+            undistorted_pts = cv2.perspectiveTransform(field_pts_arr, homography_inv)
+            undistorted_pts_2d = undistorted_pts.reshape(-1, 2)
+
+            # SCHRITT 1: Rotation rückgängig machen (ZUERST, bevor Fisheye!)
+            # Das Bild wurde nach der Entzerrung rotiert, also müssen wir
+            # die Punkte zurück-rotieren bevor wir die Verzerrung anwenden
+            #
+            # WICHTIG: Wenn das BILD um +R Grad rotiert wurde, dann erscheinen
+            # die PUNKTE an anderen Stellen. Um sie zurückzutransformieren,
+            # müssen wir die PUNKTE um +R Grad rotieren (nicht -R!),
+            # weil wir die inverse Bildtransformation auf Punkte anwenden.
+            if abs(rotation) > 0.01:
+                center = np.array([w / 2, h / 2])
+                # Positive Rotation auf Punkte = inverse der Bildrotation
+                angle_rad = np.radians(rotation)  # POSITIV, nicht negativ!
+                cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
+                rotated_pts = np.zeros_like(undistorted_pts_2d)
+                for i, pt in enumerate(undistorted_pts_2d):
+                    translated = pt - center
+                    rotated_pts[i, 0] = translated[0] * cos_a - translated[1] * sin_a + center[0]
+                    rotated_pts[i, 1] = translated[0] * sin_a + translated[1] * cos_a + center[1]
+                undistorted_pts_2d = rotated_pts
+                print(f"Applied rotation correction: {rotation}° on {len(rotated_pts)} points")
+
+            # SCHRITT 2: Von gezoomter Kameramatrix zu normalisierten Koordinaten
+            fx_zoom, fy_zoom = zoomed_K[0, 0], zoomed_K[1, 1]
+            cx, cy = camera_matrix[0, 2], camera_matrix[1, 2]
+
+            # Normalisierte Koordinaten (3D-Richtungen auf Z=1 Ebene)
+            normalized = np.zeros_like(undistorted_pts_2d)
+            normalized[:, 0] = (undistorted_pts_2d[:, 0] - cx) / fx_zoom
+            normalized[:, 1] = (undistorted_pts_2d[:, 1] - cy) / fy_zoom
+
+            # SCHRITT 3: Fisheye-Verzerrung anwenden
+            pts_3d = np.zeros((len(normalized), 3), dtype=np.float32)
+            pts_3d[:, 0] = normalized[:, 0]
+            pts_3d[:, 1] = normalized[:, 1]
+            pts_3d[:, 2] = 1.0
+
+            rvec = np.zeros(3, dtype=np.float32)
+            tvec = np.zeros(3, dtype=np.float32)
+
+            distorted, _ = cv2.fisheye.projectPoints(
+                pts_3d.reshape(-1, 1, 3),
+                rvec,
+                tvec,
+                camera_matrix,
+                distortion_coeffs
+            )
+
+            return distorted.reshape(-1, 2)
+
+        def draw_segmented_line(start, end, color, thickness, num_segments=None):
+            """Zeichnet eine Linie als viele kurze Segmente."""
+            dist = np.sqrt((end[0] - start[0])**2 + (end[1] - start[1])**2)
+            if num_segments is None:
+                num_segments = max(int(dist / SEGMENT_LENGTH), 2)
+
+            field_points = []
+            for i in range(num_segments + 1):
+                t = i / num_segments
+                x = start[0] + t * (end[0] - start[0])
+                y = start[1] + t * (end[1] - start[1])
+                field_points.append((x, y))
+
+            distorted = transform_and_distort_line(field_points)
+            pts = np.array(distorted, dtype=np.int32)
+            cv2.polylines(overlay, [pts], False, color, thickness, cv2.LINE_AA)
+
+        def draw_segmented_circle(center, radius, color, thickness, num_points=60):
+            """Zeichnet einen Kreis als viele kurze Segmente."""
+            field_points = []
+            for i in range(num_points + 1):
+                angle = 2 * np.pi * i / num_points
+                x = center[0] + radius * np.cos(angle)
+                y = center[1] + radius * np.sin(angle)
+                field_points.append((x, y))
+
+            distorted = transform_and_distort_line(field_points)
+            pts = np.array(distorted, dtype=np.int32)
+            cv2.polylines(overlay, [pts], True, color, thickness, cv2.LINE_AA)
+
+        def draw_segmented_arc(center, radius, start_angle, end_angle, color, thickness, num_points=30):
+            """Zeichnet einen Bogen als Segmente."""
+            field_points = []
+            for i in range(num_points + 1):
+                t = i / num_points
+                angle = start_angle + t * (end_angle - start_angle)
+                x = center[0] + radius * np.cos(angle)
+                y = center[1] + radius * np.sin(angle)
+                # Nur Punkte innerhalb des Spielfelds
+                if 0 <= x <= FIELD_W and 0 <= y <= FIELD_H:
+                    field_points.append((x, y))
+
+            if len(field_points) >= 2:
+                distorted = transform_and_distort_line(field_points)
+                pts = np.array(distorted, dtype=np.int32)
+                cv2.polylines(overlay, [pts], False, color, thickness, cv2.LINE_AA)
+
+        # === SPIELFELD ZEICHNEN ===
+
+        # Grid (5m Abstand) - Grün
+        for x in range(0, int(FIELD_W) + 1, 5):
+            color = (0, 255, 255) if x == 20 else (0, 255, 0)  # Gelb für Mittellinie
+            thickness = 3 if x == 20 else 2
+            draw_segmented_line((x, 0), (x, FIELD_H), color, thickness)
+
+        for y in range(0, int(FIELD_H) + 1, 5):
+            draw_segmented_line((0, y), (FIELD_W, y), (0, 255, 0), 2)
+
+        # Spielfeldrand - Rot, dick
+        draw_segmented_line((0, 0), (FIELD_W, 0), (0, 0, 255), 4)
+        draw_segmented_line((FIELD_W, 0), (FIELD_W, FIELD_H), (0, 0, 255), 4)
+        draw_segmented_line((FIELD_W, FIELD_H), (0, FIELD_H), (0, 0, 255), 4)
+        draw_segmented_line((0, FIELD_H), (0, 0), (0, 0, 255), 4)
+
+        # Mittelkreis (3m Radius) - Cyan
+        draw_segmented_circle((20, 10), 3, (255, 255, 0), 2)
+
+        # Torräume (2.85m Halbkreis) - Magenta
+        draw_segmented_arc((0, 10), 2.85, -np.pi/2, np.pi/2, (255, 0, 255), 2)
+        draw_segmented_arc((40, 10), 2.85, np.pi/2, 3*np.pi/2, (255, 0, 255), 2)
+
+        # Referenzpunkte einzeichnen (orange)
+        # Nutzen dieselbe transform_and_distort_line Logik für konsistente Transformation
+        for i, pair in enumerate(point_pairs):
+            # Einzelpunkt als "Linie" mit einem Punkt transformieren
+            pt = [(pair["field"]["x"], pair["field"]["y"])]
+            dist_pt = transform_and_distort_line(pt)
+            x, y = int(dist_pt[0][0]), int(dist_pt[0][1])
+
+            cv2.circle(overlay, (x, y), 10, (0, 165, 255), -1)
+            cv2.circle(overlay, (x, y), 10, (255, 255, 255), 2)
+            cv2.putText(overlay, str(i+1), (x-5, y+5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+
+        # Speichern
+        output_path = calibration_dir / "distorted_overlay.jpg"
+        cv2.imwrite(str(output_path), overlay)
+
+        return jsonify({
+            "success": True,
+            "overlay_path": str(output_path)
+        })
+
+    except Exception as e:
+        import traceback
+        print(f"Distorted overlay error: {e}")
+        print(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+
+
 # === Static Files ===
+
+@calibration_bp.route("/api/videos/<video_id>/custom-undistort", methods=["POST"])
+def api_custom_undistort(video_id):
+    """
+    Entzerrt einen Screenshot mit benutzerdefinierten k1-k4 Parametern.
+    Basis-Parameter werden von einem existierenden Lens-Profil übernommen.
+
+    JSON Body:
+        base_profile_id: ID des Basis-Lens-Profils (für Kameramatrix)
+        k1, k2, k3, k4: Distortion-Koeffizienten (optional, überschreiben Basis-Profil)
+        zoom_out: Zoom-Faktor (default: 1.2)
+        screenshot_path: Pfad zum Screenshot (optional)
+        draw_guidelines: Boolean - horizontale Hilfslinien zeichnen (default: true)
+        guideline_count: Anzahl Hilfslinien (default: 10)
+
+    Returns:
+        undistorted_path: Pfad zum entzerrten Bild mit Hilfslinien
+    """
+    import cv2
+    import numpy as np
+    from src.processing.calibration import load_lens_profile, scale_camera_matrix
+
+    video = db.session.get(Video, video_id)
+    if not video:
+        return jsonify({"error": "Video nicht gefunden"}), 404
+
+    data = request.get_json() or {}
+    base_profile_id = data.get("base_profile_id")
+    zoom_out = data.get("zoom_out", 1.2)
+    rotation = data.get("rotation", 0.0)  # Rotation in Grad
+    draw_guidelines = data.get("draw_guidelines", True)
+    guideline_count = data.get("guideline_count", 10)
+
+    # Distortion-Koeffizienten
+    k1 = data.get("k1")
+    k2 = data.get("k2")
+    k3 = data.get("k3")
+    k4 = data.get("k4")
+
+    calibration_dir = PROJECT_ROOT / "data" / "calibration" / video_id
+
+    # Screenshot-Pfad bestimmen
+    screenshot_path = data.get("screenshot_path")
+    if not screenshot_path:
+        for candidate in ["calibration_frame.jpg", "screenshots/frame_0000.jpg"]:
+            candidate_path = calibration_dir / candidate
+            if candidate_path.exists():
+                screenshot_path = str(candidate_path)
+                break
+
+    if not screenshot_path or not os.path.exists(screenshot_path):
+        return jsonify({"error": "Screenshot nicht gefunden"}), 404
+
+    try:
+        # Bild laden
+        img = cv2.imread(screenshot_path)
+        if img is None:
+            return jsonify({"error": "Screenshot konnte nicht geladen werden"}), 500
+
+        h, w = img.shape[:2]
+
+        # Kameramatrix aus Basis-Profil oder Standard für GoPro Hero 10
+        if base_profile_id:
+            profile = load_lens_profile(base_profile_id)
+            if not profile:
+                return jsonify({"error": f"Basis-Profil '{base_profile_id}' nicht gefunden"}), 404
+
+            fisheye_params = profile.get("fisheye_params", {})
+            camera_matrix = np.array(fisheye_params.get("camera_matrix"), dtype=np.float64)
+            base_coeffs = np.array(fisheye_params.get("distortion_coeffs"), dtype=np.float64).flatten()
+
+            # Skalieren falls nötig
+            profile_res = profile.get("resolution", {})
+            profile_w = profile_res.get("width", w)
+            profile_h = profile_res.get("height", h)
+
+            if profile_w != w or profile_h != h:
+                camera_matrix = scale_camera_matrix(camera_matrix, (profile_w, profile_h), (w, h))
+        else:
+            # Standard GoPro Hero 10 Kameramatrix (4K)
+            fx = w * 0.415  # Typischer Wert für GoPro
+            fy = fx
+            cx = w / 2
+            cy = h / 2
+            camera_matrix = np.array([
+                [fx, 0, cx],
+                [0, fy, cy],
+                [0, 0, 1]
+            ], dtype=np.float64)
+            base_coeffs = np.array([0.15, -0.15, 0.1, -0.04])  # Typische GoPro-Werte
+
+        # Custom-Koeffizienten anwenden
+        distortion_coeffs = np.array([
+            k1 if k1 is not None else base_coeffs[0],
+            k2 if k2 is not None else base_coeffs[1],
+            k3 if k3 is not None else base_coeffs[2],
+            k4 if k4 is not None else base_coeffs[3]
+        ], dtype=np.float64).reshape(4, 1)
+
+        # Neue Kameramatrix für Zoom-Out
+        new_K = camera_matrix.copy()
+        new_K[0, 0] /= zoom_out
+        new_K[1, 1] /= zoom_out
+
+        # Undistortion Maps berechnen
+        map1, map2 = cv2.fisheye.initUndistortRectifyMap(
+            camera_matrix, distortion_coeffs,
+            np.eye(3), new_K,
+            (w, h), cv2.CV_16SC2
+        )
+
+        # Entzerren
+        undistorted = cv2.remap(img, map1, map2, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+
+        # Rotation anwenden (falls nicht 0)
+        if abs(rotation) > 0.01:
+            center = (w / 2, h / 2)
+            rotation_matrix = cv2.getRotationMatrix2D(center, rotation, 1.0)
+            undistorted = cv2.warpAffine(undistorted, rotation_matrix, (w, h),
+                                         flags=cv2.INTER_LINEAR,
+                                         borderMode=cv2.BORDER_CONSTANT,
+                                         borderValue=(0, 0, 0))
+
+        # Hilfslinien zeichnen
+        if draw_guidelines:
+            # Horizontale Linien
+            for i in range(1, guideline_count):
+                y_pos = int(h * i / guideline_count)
+                cv2.line(undistorted, (0, y_pos), (w, y_pos), (0, 255, 255), 1, cv2.LINE_AA)
+
+            # Vertikale Linien (weniger, hauptsächlich Mitte und Drittel)
+            for x_ratio in [0.25, 0.5, 0.75]:
+                x_pos = int(w * x_ratio)
+                color = (0, 255, 0) if x_ratio == 0.5 else (0, 200, 200)
+                thickness = 2 if x_ratio == 0.5 else 1
+                cv2.line(undistorted, (x_pos, 0), (x_pos, h), color, thickness, cv2.LINE_AA)
+
+            # Info-Text
+            info_text = f"k1={distortion_coeffs[0][0]:.4f}  k2={distortion_coeffs[1][0]:.4f}  k3={distortion_coeffs[2][0]:.4f}  k4={distortion_coeffs[3][0]:.4f}  zoom={zoom_out:.2f}  rot={rotation:.1f}"
+            cv2.putText(undistorted, info_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            cv2.putText(undistorted, info_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 1)
+
+        # Speichern
+        output_path = calibration_dir / "custom_undistorted.jpg"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(output_path), undistorted)
+
+        return jsonify({
+            "success": True,
+            "undistorted_path": str(output_path),
+            "params": {
+                "k1": float(distortion_coeffs[0][0]),
+                "k2": float(distortion_coeffs[1][0]),
+                "k3": float(distortion_coeffs[2][0]),
+                "k4": float(distortion_coeffs[3][0]),
+                "zoom_out": zoom_out,
+                "rotation": rotation
+            }
+        })
+
+    except Exception as e:
+        import traceback
+        print(f"Custom undistort error: {e}")
+        print(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+
+
+@calibration_bp.route("/api/videos/<video_id>/custom-undistort-with-trapez", methods=["POST"])
+def api_custom_undistort_with_trapez(video_id):
+    """
+    Entzerrt einen Screenshot und zeichnet ein Trapez mit Fluchtlinien.
+
+    JSON Body:
+        ... (wie custom-undistort)
+        trapez_points: Liste von 4 Punkten [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+                      Reihenfolge: oben-links, oben-rechts, unten-rechts, unten-links
+    """
+    import cv2
+    import numpy as np
+    from src.processing.calibration import load_lens_profile, scale_camera_matrix
+
+    video = db.session.get(Video, video_id)
+    if not video:
+        return jsonify({"error": "Video nicht gefunden"}), 404
+
+    data = request.get_json() or {}
+    base_profile_id = data.get("base_profile_id")
+    zoom_out = data.get("zoom_out", 1.2)
+    rotation = data.get("rotation", 0.0)  # Rotation in Grad
+    trapez_points = data.get("trapez_points", [])
+    draw_guidelines = data.get("draw_guidelines", True)
+
+    # Distortion-Koeffizienten
+    k1 = data.get("k1")
+    k2 = data.get("k2")
+    k3 = data.get("k3")
+    k4 = data.get("k4")
+
+    calibration_dir = PROJECT_ROOT / "data" / "calibration" / video_id
+
+    # Screenshot-Pfad bestimmen
+    screenshot_path = data.get("screenshot_path")
+    if not screenshot_path:
+        for candidate in ["calibration_frame.jpg", "screenshots/frame_0000.jpg"]:
+            candidate_path = calibration_dir / candidate
+            if candidate_path.exists():
+                screenshot_path = str(candidate_path)
+                break
+
+    if not screenshot_path or not os.path.exists(screenshot_path):
+        return jsonify({"error": "Screenshot nicht gefunden"}), 404
+
+    try:
+        # Bild laden
+        img = cv2.imread(screenshot_path)
+        if img is None:
+            return jsonify({"error": "Screenshot konnte nicht geladen werden"}), 500
+
+        h, w = img.shape[:2]
+
+        # Kameramatrix und Distortion
+        if base_profile_id:
+            profile = load_lens_profile(base_profile_id)
+            if profile:
+                fisheye_params = profile.get("fisheye_params", {})
+                camera_matrix = np.array(fisheye_params.get("camera_matrix"), dtype=np.float64)
+                base_coeffs = np.array(fisheye_params.get("distortion_coeffs"), dtype=np.float64).flatten()
+
+                profile_res = profile.get("resolution", {})
+                profile_w = profile_res.get("width", w)
+                profile_h = profile_res.get("height", h)
+
+                if profile_w != w or profile_h != h:
+                    camera_matrix = scale_camera_matrix(camera_matrix, (profile_w, profile_h), (w, h))
+            else:
+                return jsonify({"error": f"Basis-Profil '{base_profile_id}' nicht gefunden"}), 404
+        else:
+            fx = w * 0.415
+            fy = fx
+            cx = w / 2
+            cy = h / 2
+            camera_matrix = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float64)
+            base_coeffs = np.array([0.15, -0.15, 0.1, -0.04])
+
+        distortion_coeffs = np.array([
+            k1 if k1 is not None else base_coeffs[0],
+            k2 if k2 is not None else base_coeffs[1],
+            k3 if k3 is not None else base_coeffs[2],
+            k4 if k4 is not None else base_coeffs[3]
+        ], dtype=np.float64).reshape(4, 1)
+
+        # Neue Kameramatrix für Zoom-Out
+        new_K = camera_matrix.copy()
+        new_K[0, 0] /= zoom_out
+        new_K[1, 1] /= zoom_out
+
+        # Undistortion Maps berechnen
+        map1, map2 = cv2.fisheye.initUndistortRectifyMap(
+            camera_matrix, distortion_coeffs,
+            np.eye(3), new_K,
+            (w, h), cv2.CV_16SC2
+        )
+
+        # Entzerren
+        undistorted = cv2.remap(img, map1, map2, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+
+        # Rotation anwenden (falls nicht 0)
+        if abs(rotation) > 0.01:
+            center = (w / 2, h / 2)
+            rotation_matrix = cv2.getRotationMatrix2D(center, rotation, 1.0)
+            undistorted = cv2.warpAffine(undistorted, rotation_matrix, (w, h),
+                                         flags=cv2.INTER_LINEAR,
+                                         borderMode=cv2.BORDER_CONSTANT,
+                                         borderValue=(0, 0, 0))
+
+        # Hilfslinien
+        if draw_guidelines:
+            for i in range(1, 10):
+                y_pos = int(h * i / 10)
+                cv2.line(undistorted, (0, y_pos), (w, y_pos), (0, 255, 255), 1, cv2.LINE_AA)
+
+            for x_ratio in [0.25, 0.5, 0.75]:
+                x_pos = int(w * x_ratio)
+                color = (0, 255, 0) if x_ratio == 0.5 else (0, 200, 200)
+                cv2.line(undistorted, (x_pos, 0), (x_pos, h), color, 1, cv2.LINE_AA)
+
+        # Trapez und Fluchtlinien zeichnen
+        if len(trapez_points) == 4:
+            pts = np.array(trapez_points, dtype=np.int32)
+
+            # Trapez zeichnen (magenta)
+            cv2.polylines(undistorted, [pts], True, (255, 0, 255), 2, cv2.LINE_AA)
+
+            # Punkte markieren
+            for i, pt in enumerate(trapez_points):
+                cv2.circle(undistorted, (int(pt[0]), int(pt[1])), 6, (255, 0, 255), -1)
+                cv2.putText(undistorted, str(i+1), (int(pt[0])+8, int(pt[1])+5),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+
+            # Fluchtpunkt berechnen (Schnittpunkt der verlängerten Seiten)
+            # Linke Seite: Punkt 0 → Punkt 3
+            # Rechte Seite: Punkt 1 → Punkt 2
+            p0, p1, p2, p3 = [np.array(p) for p in trapez_points]
+
+            # Verlängerte Linien nach oben (Fluchtpunkt)
+            def line_intersection(p1, p2, p3, p4):
+                """Berechnet Schnittpunkt zweier Linien."""
+                x1, y1 = p1
+                x2, y2 = p2
+                x3, y3 = p3
+                x4, y4 = p4
+
+                denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+                if abs(denom) < 1e-10:
+                    return None  # Parallel
+
+                t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
+
+                x = x1 + t * (x2 - x1)
+                y = y1 + t * (y2 - y1)
+                return (x, y)
+
+            # Fluchtpunkt der vertikalen Seiten
+            vanishing_point = line_intersection(p0, p3, p1, p2)
+
+            if vanishing_point:
+                vx, vy = vanishing_point
+
+                # Fluchtlinien zeichnen (cyan, gestrichelt simuliert durch kurze Segmente)
+                # Von oberen Ecken zum Fluchtpunkt
+                cv2.line(undistorted, (int(p0[0]), int(p0[1])), (int(vx), int(vy)), (255, 255, 0), 1, cv2.LINE_AA)
+                cv2.line(undistorted, (int(p1[0]), int(p1[1])), (int(vx), int(vy)), (255, 255, 0), 1, cv2.LINE_AA)
+
+                # Fluchtpunkt markieren (wenn im Bild)
+                if 0 <= vx <= w and 0 <= vy <= h:
+                    cv2.circle(undistorted, (int(vx), int(vy)), 10, (0, 255, 255), 2)
+                    cv2.putText(undistorted, "VP", (int(vx)+12, int(vy)+5),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+
+        # Info-Text
+        info_text = f"k1={distortion_coeffs[0][0]:.4f}  k2={distortion_coeffs[1][0]:.4f}  k3={distortion_coeffs[2][0]:.4f}  k4={distortion_coeffs[3][0]:.4f}  rot={rotation:.1f}"
+        cv2.putText(undistorted, info_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        cv2.putText(undistorted, info_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 1)
+
+        # Speichern
+        output_path = calibration_dir / "custom_undistorted.jpg"
+        cv2.imwrite(str(output_path), undistorted)
+
+        return jsonify({
+            "success": True,
+            "undistorted_path": str(output_path),
+            "params": {
+                "k1": float(distortion_coeffs[0][0]),
+                "k2": float(distortion_coeffs[1][0]),
+                "k3": float(distortion_coeffs[2][0]),
+                "k4": float(distortion_coeffs[3][0]),
+                "zoom_out": zoom_out,
+                "rotation": rotation
+            },
+            "vanishing_point": vanishing_point if len(trapez_points) == 4 else None
+        })
+
+    except Exception as e:
+        import traceback
+        print(f"Custom undistort with trapez error: {e}")
+        print(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+
+
+@calibration_bp.route("/api/lens-profiles/save-custom", methods=["POST"])
+def api_save_custom_lens_profile():
+    """
+    Speichert ein Custom-Lens-Profil mit benutzerdefinierten k1-k4 Parametern.
+
+    JSON Body:
+        name: Name des Profils
+        base_profile_id: ID des Basis-Profils (für Kameramatrix)
+        k1, k2, k3, k4: Distortion-Koeffizienten
+        resolution: {width, height}
+    """
+    import json
+    from datetime import datetime
+    from src.processing.calibration import load_lens_profile
+
+    data = request.get_json() or {}
+    name = data.get("name")
+    base_profile_id = data.get("base_profile_id")
+
+    if not name:
+        return jsonify({"error": "Name erforderlich"}), 400
+
+    # Basis-Profil laden
+    if base_profile_id:
+        base_profile = load_lens_profile(base_profile_id)
+        if not base_profile:
+            return jsonify({"error": f"Basis-Profil '{base_profile_id}' nicht gefunden"}), 404
+
+        camera_matrix = base_profile.get("fisheye_params", {}).get("camera_matrix")
+        resolution = base_profile.get("resolution", {"width": 3840, "height": 2160})
+    else:
+        # Standard GoPro 10 Matrix
+        resolution = data.get("resolution", {"width": 3840, "height": 2160})
+        w, h = resolution["width"], resolution["height"]
+        fx = w * 0.415
+        camera_matrix = [[fx, 0, w/2], [0, fx, h/2], [0, 0, 1]]
+
+    # Custom Distortion-Koeffizienten
+    k1 = data.get("k1", 0.15)
+    k2 = data.get("k2", -0.15)
+    k3 = data.get("k3", 0.1)
+    k4 = data.get("k4", -0.04)
+
+    # Zoom und Rotation
+    zoom_out = data.get("zoom_out", 1.2)
+    rotation = data.get("rotation", 0.0)
+
+    profile = {
+        "name": name,
+        "camera_name": "Custom (basierend auf " + (base_profile_id or "Standard GoPro 10") + ")",
+        "lens_type": "fisheye",
+        "resolution": resolution,
+        "fisheye_params": {
+            "camera_matrix": camera_matrix,
+            "distortion_coeffs": [k1, k2, k3, k4]
+        },
+        "undistort_params": {
+            "zoom_out": zoom_out,
+            "rotation": rotation
+        },
+        "base_profile_id": base_profile_id,
+        "created_at": datetime.utcnow().isoformat(),
+        "source": "Manuelle Anpassung"
+    }
+
+    # Speichern
+    profiles_dir = PROJECT_ROOT / "data" / "lens_profiles"
+    profiles_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_name = "".join(c if c.isalnum() or c in '-_' else '_' for c in name)
+    profile_path = profiles_dir / f"custom_{safe_name}.json"
+
+    counter = 1
+    while profile_path.exists():
+        profile_path = profiles_dir / f"custom_{safe_name}_{counter}.json"
+        counter += 1
+
+    with open(profile_path, 'w') as f:
+        json.dump(profile, f, indent=2)
+
+    return jsonify({
+        "success": True,
+        "id": profile_path.stem,
+        "path": str(profile_path)
+    })
+
 
 @calibration_bp.route("/screenshot/<video_id>/<path:filename>")
 def serve_screenshot(video_id, filename):

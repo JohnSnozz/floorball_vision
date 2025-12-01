@@ -25,7 +25,7 @@ def get_available_lens_profiles() -> List[Dict[str, Any]]:
     Gibt alle verfügbaren Lens-Profile zurück.
 
     Returns:
-        Liste von Profile-Infos mit id, name, description
+        Liste von Profile-Infos mit id, name, description, fisheye_params
     """
     profiles = []
 
@@ -42,7 +42,12 @@ def get_available_lens_profiles() -> List[Dict[str, Any]]:
                     "description": data.get("description", ""),
                     "camera_model": data.get("camera_model", ""),
                     "lens_model": data.get("lens_model", ""),
-                    "resolution": data.get("resolution", {})
+                    "resolution": data.get("resolution", {}),
+                    "fisheye_params": data.get("fisheye_params", {}),
+                    "undistort_params": data.get("undistort_params", {}),
+                    "source": data.get("source", ""),
+                    "base_profile_id": data.get("base_profile_id"),
+                    "estimated": data.get("estimated", False)
                 })
         except Exception as e:
             print(f"Fehler beim Laden von {profile_file}: {e}")

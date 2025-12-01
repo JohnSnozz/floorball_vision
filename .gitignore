@@ -104,11 +104,23 @@ Desktop.ini
 .ropeproject/
 
 # --------------------------------------------
+# ENTWICKLUNG (nicht synchronisiert)
+# --------------------------------------------
+dev/
+
+# --------------------------------------------
 # CLAUDE CODE / AI ASSISTENTEN
 # --------------------------------------------
 .claude/
+.claude*
 CLAUDE.md
 CLAUDE.local.md
+claude.md
+*.claude
+.cursorrules
+.aider*
+.continue/
+.copilot/
 
 # --------------------------------------------
 # LOGS & TEMPORÄRE DATEIEN
@@ -138,6 +150,7 @@ migrations/versions/__pycache__/
 # --------------------------------------------
 # TESTS
 # --------------------------------------------
+tests/
 .pytest_cache/
 .coverage
 htmlcov/
