@@ -1,11 +1,13 @@
 """
 Training Routes
 
-Endpoints für YOLO Training.
+Endpoints für YOLO Training und ML Backend für Label Studio.
 """
 import os
 import re
 import yaml
+import signal
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from flask import Blueprint, render_template, request, jsonify, abort
@@ -14,6 +16,10 @@ from src.db.models import LabelingProject, TrainingRun, ActiveModel
 from src.processing.tasks import start_training
 
 training_bp = Blueprint("training", __name__, url_prefix="/training")
+
+# Globale Variable für ML Backend Prozess
+_ml_backend_process = None
+_ml_backend_port = 9090
 
 
 def load_yolo_config():
@@ -769,5 +775,251 @@ def api_delete_dataset(dataset_name):
             "deleted": dataset_name
         })
 
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# === ML Backend API (für Label Studio Pre-Annotation) ===
+
+@training_bp.route("/api/ml-backend/status")
+def api_ml_backend_status():
+    """Prüft den Status des ML Backends."""
+    global _ml_backend_process, _ml_backend_port
+
+    is_running = False
+    pid = None
+    model_info = None
+
+    # Prüfe direkt ob Server antwortet (unabhängig von _ml_backend_process)
+    try:
+        import requests
+        resp = requests.get(f"http://localhost:{_ml_backend_port}/health", timeout=2)
+        if resp.ok:
+            is_running = True
+            model_info = resp.json()
+            # Finde PID
+            result = subprocess.run(["pgrep", "-f", "ml_backend"], capture_output=True, text=True)
+            if result.stdout.strip():
+                pid = int(result.stdout.strip().split()[0])
+    except Exception:
+        is_running = False
+
+    # Verfügbare Modelle für ML Backend
+    available_models = []
+    models_dir = Path("models/trained")
+    if models_dir.exists():
+        for model_dir in models_dir.iterdir():
+            if model_dir.is_dir():
+                best_pt = model_dir / "weights" / "best.pt"
+                if best_pt.exists():
+                    available_models.append({
+                        "name": model_dir.name,
+                        "path": str(best_pt)
+                    })
+
+    # Aktives Modell hinzufügen
+    active = db.session.query(ActiveModel).first()
+    if active and active.model_path:
+        model_path = Path(active.model_path)
+        if model_path.exists():
+            # Prüfe ob schon in Liste
+            if not any(m["path"] == str(model_path) for m in available_models):
+                available_models.insert(0, {
+                    "name": f"{active.model_name} (aktiv)",
+                    "path": str(model_path)
+                })
+
+    return jsonify({
+        "running": is_running,
+        "pid": pid,
+        "port": _ml_backend_port,
+        "url": f"http://localhost:{_ml_backend_port}" if is_running else None,
+        "model_info": model_info,
+        "available_models": available_models
+    })
+
+
+@training_bp.route("/api/ml-backend/start", methods=["POST"])
+def api_ml_backend_start():
+    """Startet das ML Backend mit einem YOLO-Modell."""
+    global _ml_backend_process, _ml_backend_port
+
+    # Prüfe ob bereits läuft
+    if _ml_backend_process is not None:
+        poll = _ml_backend_process.poll()
+        if poll is None:
+            return jsonify({"error": "ML Backend läuft bereits", "port": _ml_backend_port}), 400
+
+    data = request.get_json() or {}
+    model_path = data.get("model_path")
+    confidence = data.get("confidence", 0.25)
+    port = data.get("port", 9090)
+
+    # Falls kein Modell angegeben, verwende aktives Modell
+    if not model_path:
+        active = db.session.query(ActiveModel).first()
+        if active and active.model_path:
+            model_path = active.model_path
+        else:
+            return jsonify({"error": "Kein Modell angegeben und kein aktives Modell vorhanden"}), 400
+
+    # Modell-Pfad zu absolutem Pfad konvertieren
+    project_root = Path(__file__).parent.parent.parent.parent
+    model_path_obj = Path(model_path)
+    if not model_path_obj.is_absolute():
+        model_path_obj = project_root / model_path
+    model_path = str(model_path_obj.resolve())
+
+    # Prüfe ob Modell existiert
+    if not Path(model_path).exists():
+        return jsonify({"error": f"Modell nicht gefunden: {model_path}"}), 404
+
+    _ml_backend_port = port
+
+    try:
+        # ML Backend als Subprocess starten
+        cmd = [
+            "python", "-m", "src.labeling.ml_backend",
+            "--model", model_path,
+            "--port", str(port),
+            "--confidence", str(confidence)
+        ]
+
+        # Log-Datei
+        log_file = project_root / "data" / "ml_backend.log"
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Mit nohup starten damit es unabhängig läuft
+        full_cmd = f"nohup python -m src.labeling.ml_backend --model '{model_path}' --port {port} --confidence {confidence} > '{log_file}' 2>&1 &"
+
+        _ml_backend_process = subprocess.Popen(
+            full_cmd,
+            shell=True,
+            cwd=str(project_root)
+        )
+
+        # Warten und prüfen ob Server antwortet
+        import time
+        import requests
+
+        for attempt in range(15):  # 15 Versuche, je 0.5s = 7.5s
+            time.sleep(0.5)
+
+            # Prüfe Health-Endpoint
+            try:
+                resp = requests.get(f"http://localhost:{port}/health", timeout=2)
+                if resp.ok:
+                    # Erfolgreich gestartet - finde die echte PID
+                    result = subprocess.run(
+                        ["pgrep", "-f", "ml_backend"],
+                        capture_output=True, text=True
+                    )
+                    pid = int(result.stdout.strip().split()[0]) if result.stdout.strip() else None
+
+                    return jsonify({
+                        "success": True,
+                        "pid": pid,
+                        "port": port,
+                        "url": f"http://localhost:{port}",
+                        "model": model_path
+                    })
+            except requests.exceptions.RequestException:
+                continue  # Noch nicht bereit, weiter warten
+
+        # Timeout - Log lesen für Fehlerdetails
+        error_details = "Server antwortet nicht nach 7.5 Sekunden"
+        if log_file.exists():
+            with open(log_file) as f:
+                log_content = f.read()
+                if log_content:
+                    error_details += f"\n\nLog:\n{log_content[-2000:]}"  # Letzte 2000 Zeichen
+
+        # Cleanup
+        subprocess.run(["pkill", "-f", "ml_backend"], capture_output=True)
+        _ml_backend_process = None
+
+        return jsonify({
+            "error": "ML Backend Timeout",
+            "details": error_details
+        }), 500
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@training_bp.route("/api/ml-backend/stop", methods=["POST"])
+def api_ml_backend_stop():
+    """Stoppt das ML Backend."""
+    global _ml_backend_process
+
+    if _ml_backend_process is None:
+        return jsonify({"error": "ML Backend läuft nicht"}), 400
+
+    try:
+        # Graceful shutdown
+        _ml_backend_process.terminate()
+
+        # Warte kurz
+        try:
+            _ml_backend_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            # Force kill
+            _ml_backend_process.kill()
+            _ml_backend_process.wait()
+
+        pid = _ml_backend_process.pid
+        _ml_backend_process = None
+
+        return jsonify({
+            "success": True,
+            "message": f"ML Backend (PID {pid}) gestoppt"
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@training_bp.route("/api/ml-backend/test", methods=["POST"])
+def api_ml_backend_test():
+    """Testet das ML Backend mit einem Bild."""
+    global _ml_backend_port
+
+    data = request.get_json() or {}
+    image_path = data.get("image_path")
+
+    if not image_path:
+        return jsonify({"error": "Kein Bild angegeben"}), 400
+
+    try:
+        import requests
+
+        # Test-Request an ML Backend
+        resp = requests.post(
+            f"http://localhost:{_ml_backend_port}/predict",
+            json={
+                "tasks": [{
+                    "id": 0,
+                    "data": {"image": image_path}
+                }]
+            },
+            timeout=30
+        )
+
+        if resp.ok:
+            results = resp.json()
+            return jsonify({
+                "success": True,
+                "results": results
+            })
+        else:
+            return jsonify({
+                "error": "ML Backend Fehler",
+                "details": resp.text
+            }), resp.status_code
+
+    except requests.exceptions.ConnectionError:
+        return jsonify({"error": "ML Backend nicht erreichbar"}), 503
     except Exception as e:
         return jsonify({"error": str(e)}), 500

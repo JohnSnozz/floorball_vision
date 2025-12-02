@@ -2547,28 +2547,16 @@ let trackingChunks = [];  // Array von {start, end, status, progress}
 let isFullTrackingRunning = false;
 
 async function loadChunkStatus() {
+    // Nur Stats laden, Chunks werden in renderChunkProgress generiert
     try {
         const response = await fetch(`/analysis/api/videos/${videoId}/analysis-chunks`);
         const data = await response.json();
-        if (data.chunks && data.chunks.length > 0) {
-            trackingChunks = data.chunks.map(c => ({
-                id: c.chunk_index,
-                start: c.start_time,
-                end: c.end_time,
-                status: c.status,
-                progress: c.status === 'completed' ? 100 : 0,
-                frames_processed: c.frames_processed,
-                detections_count: c.detections_count,
-                processing_time: c.processing_time,
-                error: c.error_message
-            }));
-        }
         // Performance-Statistiken aktualisieren
         if (data.stats) {
             updatePerformanceStats(data.stats);
         }
     } catch (e) {
-        console.log('Keine Chunks in DB gefunden');
+        console.log('Fehler beim Laden der Chunk-Statistiken');
     }
 }
 
@@ -2614,28 +2602,54 @@ async function renderChunkProgress() {
         await loadGamePeriods();
     }
 
-    // Dann Chunk-Status aus DB laden
-    await loadChunkStatus();
+    // Dann Chunk-Status aus DB laden (für bestehende Chunks)
+    let dbChunks = {};
+    try {
+        const response = await fetch(`/analysis/api/videos/${videoId}/analysis-chunks`);
+        const data = await response.json();
+        if (data.chunks) {
+            for (const c of data.chunks) {
+                // Key basierend auf Start/End-Zeit
+                const key = `${c.start_time.toFixed(1)}-${c.end_time.toFixed(1)}`;
+                dbChunks[key] = c;
+            }
+        }
+        if (data.stats) {
+            updatePerformanceStats(data.stats);
+        }
+    } catch (e) {
+        console.log('Keine Chunks in DB gefunden');
+    }
 
-    // Falls keine Chunks in DB, aus Spielzeiten generieren
-    if (trackingChunks.length === 0 && gamePeriods.length > 0) {
+    // IMMER Chunks aus gamePeriods generieren (damit aktuelle Spielzeiten verwendet werden)
+    trackingChunks = [];
+    if (gamePeriods.length > 0) {
         let chunkId = 0;
         for (const period of gamePeriods) {
             let start = period.start;
             while (start < period.end) {
                 const end = Math.min(start + 60, period.end);
+
+                // Prüfe ob dieser Chunk in DB existiert
+                const key = `${start.toFixed(1)}-${end.toFixed(1)}`;
+                const dbChunk = dbChunks[key];
+
                 trackingChunks.push({
                     id: chunkId++,
                     periodStart: period.start,
                     start: start,
                     end: end,
-                    status: 'pending',
-                    progress: 0
+                    status: dbChunk?.status || 'pending',
+                    progress: dbChunk?.status === 'completed' ? 100 : 0,
+                    processing_time: dbChunk?.processing_time || null,
+                    error: dbChunk?.error_message || null
                 });
                 start = end;
             }
         }
     }
+
+    console.log(`Generated ${trackingChunks.length} chunks from ${gamePeriods.length} game periods`);
 
     // Zusammenfassung aktualisieren
     document.getElementById('analysisPeriodCount').textContent = gamePeriods.length;

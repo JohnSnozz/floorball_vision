@@ -327,6 +327,15 @@ let trailLength = 5;
 let positionHistory = {};
 let showVideoOverlay = true;
 
+// Interpolation State
+let lastFrameData = null;       // Vorheriger Tracking-Frame
+let currentFrameData = null;    // Aktueller Tracking-Frame
+let lastFrameTime = 0;          // Timestamp des vorherigen Frames
+let currentFrameTime = 0;       // Timestamp des aktuellen Frames
+let activeTracksLastSeen = {};  // Track-ID -> letzte Zeit wo Track sichtbar war
+const TRACK_FADE_DURATION = 0.5; // Sekunden bis Track ausfaded
+let animationFrameId = null;
+
 // Video Overlay Canvas
 const videoOverlay = document.getElementById('videoOverlay');
 const videoCtx = videoOverlay.getContext('2d');
@@ -378,12 +387,21 @@ async function loadChunkData(chunkIndex) {
 
     try {
         const chunk = chunks[chunkIndex];
-        const response = await fetch(`/analysis/api/videos/${videoId}/chunk-positions/${chunk.index}`);
+        // calibration_id als Query-Parameter übergeben
+        const url = calibrationId
+            ? `/analysis/api/videos/${videoId}/chunk-positions/${chunk.index}?calibration_id=${calibrationId}`
+            : `/analysis/api/videos/${videoId}/chunk-positions/${chunk.index}`;
+        const response = await fetch(url);
 
         if (response.ok) {
             const data = await response.json();
             chunks[chunkIndex].data = data;
             chunks[chunkIndex].loaded = true;
+
+            // Warnung wenn keine Kalibrierung
+            if (!data.has_calibration) {
+                console.warn(`Chunk ${chunkIndex}: No calibration - field positions unavailable`);
+            }
 
             // UI aktualisieren
             const bar = document.querySelector(`.chunk-bar[data-chunk="${chunk.index}"]`);
@@ -392,7 +410,7 @@ async function loadChunkData(chunkIndex) {
             const loadedCount = chunks.filter(c => c.loaded).length;
             document.getElementById('loadedChunks').textContent = loadedCount;
 
-            console.log(`Chunk ${chunkIndex} loaded: ${data.frames?.length || 0} frames`);
+            console.log(`Chunk ${chunkIndex} loaded: ${data.frames?.length || 0} frames, calibration: ${data.has_calibration}`);
         }
     } catch (e) {
         console.error(`Error loading chunk ${chunkIndex}:`, e);
@@ -437,16 +455,19 @@ function drawPositions(frameData) {
     // Trails zeichnen
     if (trailLength > 0) {
         for (const det of frameData.detections) {
-            if (!det.track_id || !det.field_x || !det.field_y) continue;
+            if (!det.track_id || det.field_x == null || det.field_y == null) continue;
 
             const history = positionHistory[det.track_id] || [];
             if (history.length >= 2) {
+                // Smoothe Trail mit Bezier-Kurven oder einfach Polyline
                 const pathPoints = history.map(h => `${h.x},${FIELD_WIDTH - h.y}`).join(' ');
                 const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
                 polyline.setAttribute('points', pathPoints);
                 polyline.setAttribute('fill', 'none');
-                polyline.setAttribute('stroke', getTeamColor(det.team, 0.4));
+                polyline.setAttribute('stroke', getTeamColor(det.team, 0.4 * (det.opacity || 1)));
                 polyline.setAttribute('stroke-width', '0.3');
+                polyline.setAttribute('stroke-linecap', 'round');
+                polyline.setAttribute('stroke-linejoin', 'round');
                 playersOverlay.appendChild(polyline);
             }
         }
@@ -454,24 +475,31 @@ function drawPositions(frameData) {
 
     // Spieler zeichnen
     for (const det of frameData.detections) {
-        if (!det.field_x || !det.field_y) continue;
+        if (det.field_x == null || det.field_y == null) continue;
+
+        const opacity = det.opacity !== undefined ? det.opacity : 1.0;
+        if (opacity <= 0.05) continue; // Nicht zeichnen wenn fast unsichtbar
 
         const svgX = det.field_x;
         const svgY = FIELD_WIDTH - det.field_y;
 
         if (svgX < -1 || svgX > FIELD_LENGTH + 1 || svgY < -1 || svgY > FIELD_WIDTH + 1) continue;
 
-        const color = getTeamColor(det.team);
+        const color = getTeamColor(det.team, opacity);
         const radius = 0.6;
+
+        // Gruppe für Spieler (für Opacity)
+        const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        group.setAttribute('opacity', opacity);
 
         const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
         circle.setAttribute('cx', svgX);
         circle.setAttribute('cy', svgY);
         circle.setAttribute('r', radius);
-        circle.setAttribute('fill', color);
+        circle.setAttribute('fill', getTeamColor(det.team));
         circle.setAttribute('stroke', 'white');
         circle.setAttribute('stroke-width', '0.1');
-        playersOverlay.appendChild(circle);
+        group.appendChild(circle);
 
         // Track-ID anzeigen
         if (det.track_id) {
@@ -483,18 +511,23 @@ function drawPositions(frameData) {
             text.setAttribute('font-weight', 'bold');
             text.setAttribute('fill', 'white');
             text.textContent = det.track_id;
-            playersOverlay.appendChild(text);
+            group.appendChild(text);
         }
 
-        // Position History aktualisieren
-        if (det.track_id) {
+        playersOverlay.appendChild(group);
+
+        // Position History aktualisieren (nur wenn opacity hoch genug)
+        if (det.track_id && opacity > 0.5) {
             if (!positionHistory[det.track_id]) {
                 positionHistory[det.track_id] = [];
             }
             const history = positionHistory[det.track_id];
-            if (history.length === 0 || history[history.length - 1].x !== det.field_x || history[history.length - 1].y !== det.field_y) {
+            // Immer Position hinzufügen für smooth interpolierte Trails
+            const lastPos = history[history.length - 1];
+            if (!lastPos || Math.abs(lastPos.x - det.field_x) > 0.01 || Math.abs(lastPos.y - det.field_y) > 0.01) {
                 history.push({ x: det.field_x, y: det.field_y });
-                while (history.length > trailLength) {
+                // Trail-Länge begrenzen
+                while (history.length > trailLength * 3) { // Mehr Punkte für smoothere Trails
                     history.shift();
                 }
             }
@@ -510,10 +543,14 @@ function drawVideoOverlay(frameData) {
     for (const det of frameData.detections) {
         if (!det.bbox) continue;
 
-        const [x1, y1, x2, y2] = det.bbox;
-        const color = getTeamColor(det.team);
+        const opacity = det.opacity !== undefined ? det.opacity : 1.0;
+        if (opacity <= 0.05) continue; // Nicht zeichnen wenn fast unsichtbar
 
-        videoCtx.strokeStyle = color;
+        const [x1, y1, x2, y2] = det.bbox;
+        const color = getTeamColor(det.team, opacity);
+
+        videoCtx.globalAlpha = opacity;
+        videoCtx.strokeStyle = getTeamColor(det.team);
         videoCtx.lineWidth = 3;
         videoCtx.strokeRect(x1, y1, x2 - x1, y2 - y1);
 
@@ -521,12 +558,109 @@ function drawVideoOverlay(frameData) {
             videoCtx.font = 'bold 14px sans-serif';
             const text = `#${det.track_id}`;
             const textWidth = videoCtx.measureText(text).width;
-            videoCtx.fillStyle = color;
+            videoCtx.fillStyle = getTeamColor(det.team);
             videoCtx.fillRect(x1, y1 - 20, textWidth + 8, 20);
             videoCtx.fillStyle = 'white';
             videoCtx.fillText(text, x1 + 4, y1 - 5);
         }
     }
+
+    // Reset globalAlpha
+    videoCtx.globalAlpha = 1.0;
+}
+
+// Lineare Interpolation
+function lerp(a, b, t) {
+    return a + (b - a) * Math.max(0, Math.min(1, t));
+}
+
+// Finde die zwei Frames um die aktuelle Zeit herum
+function findSurroundingFrames(chunkData, localTime) {
+    if (!chunkData || !chunkData.frames || chunkData.frames.length === 0) {
+        return { prev: null, next: null };
+    }
+
+    let prev = null;
+    let next = null;
+
+    for (let i = 0; i < chunkData.frames.length; i++) {
+        const frame = chunkData.frames[i];
+        if (frame.timestamp <= localTime) {
+            prev = frame;
+        } else {
+            next = frame;
+            break;
+        }
+    }
+
+    return { prev, next };
+}
+
+// Interpoliere Positionen zwischen zwei Frames
+function interpolatePositions(prevFrame, nextFrame, prevTime, nextTime, currentTime) {
+    if (!prevFrame) return null;
+    if (!nextFrame || prevTime >= nextTime) {
+        // Kein nächster Frame, verwende vorherigen
+        return prevFrame.detections.map(d => ({...d, opacity: 1.0}));
+    }
+
+    const t = (currentTime - prevTime) / (nextTime - prevTime);
+    const interpolated = [];
+
+    // Map für schnellen Zugriff auf next frame detections
+    const nextDetections = {};
+    for (const det of (nextFrame.detections || [])) {
+        if (det.track_id) {
+            nextDetections[det.track_id] = det;
+        }
+    }
+
+    // Interpoliere alle Detektionen aus prevFrame
+    for (const prevDet of (prevFrame.detections || [])) {
+        const trackId = prevDet.track_id;
+
+        if (trackId && nextDetections[trackId]) {
+            // Track existiert in beiden Frames - interpoliere
+            const nextDet = nextDetections[trackId];
+            interpolated.push({
+                ...prevDet,
+                field_x: prevDet.field_x !== null && nextDet.field_x !== null
+                    ? lerp(prevDet.field_x, nextDet.field_x, t)
+                    : prevDet.field_x,
+                field_y: prevDet.field_y !== null && nextDet.field_y !== null
+                    ? lerp(prevDet.field_y, nextDet.field_y, t)
+                    : prevDet.field_y,
+                bbox: prevDet.bbox && nextDet.bbox
+                    ? [
+                        lerp(prevDet.bbox[0], nextDet.bbox[0], t),
+                        lerp(prevDet.bbox[1], nextDet.bbox[1], t),
+                        lerp(prevDet.bbox[2], nextDet.bbox[2], t),
+                        lerp(prevDet.bbox[3], nextDet.bbox[3], t)
+                    ]
+                    : prevDet.bbox,
+                opacity: 1.0
+            });
+            // Markiere als gesehen
+            delete nextDetections[trackId];
+        } else {
+            // Track existiert nicht mehr im nächsten Frame - fade out
+            interpolated.push({
+                ...prevDet,
+                opacity: 1.0 - t  // Fade out während der Interpolation
+            });
+        }
+    }
+
+    // Tracks die neu im nächsten Frame auftauchen - fade in
+    for (const trackId in nextDetections) {
+        const nextDet = nextDetections[trackId];
+        interpolated.push({
+            ...nextDet,
+            opacity: t  // Fade in während der Interpolation
+        });
+    }
+
+    return interpolated;
 }
 
 function updateFrame() {
@@ -544,29 +678,40 @@ function updateFrame() {
         currentChunkIndex = chunkIndex;
         document.getElementById('currentChunk').textContent = chunkIndex >= 0 ? `${chunkIndex + 1}/${chunks.length}` : '-';
         preloadNearbyChunks(chunkIndex);
+        // Reset interpolation state bei Chunk-Wechsel
+        lastFrameData = null;
+        currentFrameData = null;
     }
 
     frameInfoEl.textContent = `Chunk: ${chunkIndex >= 0 ? chunkIndex + 1 : '-'}`;
 
-    // Frame-Daten aus Chunk laden
+    // Frame-Daten aus Chunk laden und interpolieren
     if (chunkIndex >= 0 && chunks[chunkIndex].loaded && chunks[chunkIndex].data) {
         const chunkData = chunks[chunkIndex].data;
         const localTime = videoTime - chunks[chunkIndex].start;
 
-        // Frame finden
-        let frameData = null;
-        if (chunkData.frames) {
-            for (const frame of chunkData.frames) {
-                if (frame.timestamp <= localTime) {
-                    frameData = frame;
-                } else {
-                    break;
-                }
-            }
-        }
+        // Finde umgebende Frames
+        const { prev, next } = findSurroundingFrames(chunkData, localTime);
 
-        drawPositions(frameData);
-        drawVideoOverlay(frameData);
+        if (prev) {
+            const prevTime = prev.timestamp;
+            const nextTime = next ? next.timestamp : prevTime + 1;
+
+            // Interpolierte Positionen berechnen
+            const interpolatedDetections = interpolatePositions(prev, next, prevTime, nextTime, localTime);
+
+            const interpolatedFrame = {
+                ...prev,
+                detections: interpolatedDetections,
+                interpolated: true
+            };
+
+            drawPositions(interpolatedFrame);
+            drawVideoOverlay(interpolatedFrame);
+        } else {
+            playersOverlay.innerHTML = '';
+            videoCtx.clearRect(0, 0, videoOverlay.width, videoOverlay.height);
+        }
     } else {
         playersOverlay.innerHTML = '';
         videoCtx.clearRect(0, 0, videoOverlay.width, videoOverlay.height);
@@ -592,6 +737,17 @@ function updateTimeDisplay() {
 
     updateFrame();
 }
+
+// Animation Loop für flüssige Interpolation
+function animationLoop() {
+    if (!video.paused) {
+        updateFrame();
+    }
+    animationFrameId = requestAnimationFrame(animationLoop);
+}
+
+// Starte Animation Loop
+animationLoop();
 
 // Event Listeners
 video.addEventListener('timeupdate', updateTimeDisplay);

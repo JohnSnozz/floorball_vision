@@ -184,11 +184,25 @@ def tactical_view_full(video_id):
     # Gesamtdauer berechnen
     total_duration = sum(p.end_time - p.start_time for p in periods)
 
+    # Team-Konfiguration laden (aus gespeicherten Snippets)
     team_config = {
         "team1": {"displayColor": "#3B82F6"},
         "team2": {"displayColor": "#FFFFFF"},
         "referee": {"displayColor": "#EC4899"}
     }
+
+    # Versuche team_config aus Snippets zu laden
+    snippets_file = PROJECT_ROOT / "data" / "analysis" / video_id / "snippets.json"
+    if snippets_file.exists():
+        try:
+            with open(snippets_file, "r") as f:
+                snippets = json.load(f)
+                if snippets and isinstance(snippets, list) and len(snippets) > 0:
+                    first_snippet = snippets[0]
+                    if "team_config" in first_snippet:
+                        team_config = first_snippet["team_config"]
+        except Exception as e:
+            print(f"Could not load team config: {e}")
 
     return render_template(
         "analysis/tactical_full.html",
@@ -1107,10 +1121,33 @@ def track_chunk(video_id):
 
 @analysis_bp.route("/api/videos/<video_id>/chunk-positions/<int:chunk_index>")
 def get_chunk_positions(video_id, chunk_index):
-    """Tracking-Daten für einen einzelnen Chunk abrufen."""
+    """Tracking-Daten für einen einzelnen Chunk mit Spielfeld-Koordinaten abrufen."""
+    from src.processing.calibration import load_lens_profile
+
     video = db.session.get(Video, video_id)
     if not video:
         return jsonify({"error": "Video nicht gefunden"}), 404
+
+    # Kalibrierung laden
+    calibration_id = request.args.get("calibration_id")
+    calibration = _load_calibration(video_id, video.id, calibration_id)
+
+    # Position Mapper erstellen (falls Kalibrierung vorhanden)
+    position_mapper = None
+    if calibration and calibration.calibration_data:
+        cal_data = calibration.calibration_data
+        video_width = video.width if hasattr(video, 'width') and video.width else 1920
+        video_height = video.height if hasattr(video, 'height') and video.height else 1080
+
+        try:
+            position_mapper = PositionMapper.from_calibration_data(
+                cal_data=cal_data,
+                video_width=video_width,
+                video_height=video_height,
+                lens_profile_loader=load_lens_profile
+            )
+        except Exception as e:
+            print(f"[ChunkPositions] Could not create PositionMapper: {e}")
 
     # Chunk-Datei laden
     chunk_file = PROJECT_ROOT / "data" / "analysis" / "chunks" / str(video.id) / f"chunk_{chunk_index:04d}.json"
@@ -1134,14 +1171,34 @@ def get_chunk_positions(video_id, chunk_index):
             }
 
             for det in frame.get("detections", []):
+                # Pixel-Koordinaten (Mittelpunkt der BBox)
+                center = det.get("center")
+                pixel_x = center[0] if center else None
+                pixel_y = center[1] if center else None
+
+                # Transformiere zu Spielfeld-Koordinaten
+                field_x = None
+                field_y = None
+
+                if position_mapper and pixel_x is not None and pixel_y is not None:
+                    try:
+                        field_pos = position_mapper.pixel_to_field(pixel_x, pixel_y)
+                        if field_pos:
+                            field_x, field_y = field_pos
+                    except Exception:
+                        pass
+
                 frame_data["detections"].append({
                     "track_id": det.get("track_id"),
                     "bbox": det.get("bbox"),
                     "confidence": det.get("confidence"),
                     "class_name": det.get("class_name"),
                     "team": det.get("team"),
-                    "field_x": det.get("center", [None, None])[0] if det.get("center") else None,
-                    "field_y": det.get("center", [None, None])[1] if det.get("center") else None
+                    "jersey_number": det.get("jersey_number"),
+                    "field_x": field_x,
+                    "field_y": field_y,
+                    "pixel_x": pixel_x,
+                    "pixel_y": pixel_y
                 })
 
             frames.append(frame_data)
@@ -1150,10 +1207,13 @@ def get_chunk_positions(video_id, chunk_index):
             "chunk_index": chunk_index,
             "start_time": chunk_data.get("start_time"),
             "end_time": chunk_data.get("end_time"),
+            "has_calibration": position_mapper is not None,
             "frames": frames
         })
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 

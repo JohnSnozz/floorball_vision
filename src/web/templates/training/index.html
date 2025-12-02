@@ -403,6 +403,63 @@
                 {% endif %}
             </div>
 
+            <!-- ML Backend für Label Studio -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-lg font-semibold mb-4">ML Backend (Pre-Annotation)</h2>
+                <p class="text-sm text-gray-600 mb-4">
+                    Starte das ML Backend, um in Label Studio automatische Vorhersagen für neue Bilder zu erhalten.
+                </p>
+
+                <div id="ml-backend-status" class="mb-4">
+                    <div class="flex items-center gap-2 mb-2">
+                        <div id="ml-status-indicator" class="w-3 h-3 rounded-full bg-gray-400"></div>
+                        <span id="ml-status-text" class="text-sm text-gray-600">Status wird geprüft...</span>
+                    </div>
+                    <div id="ml-backend-url" class="text-xs text-blue-600 hidden"></div>
+                </div>
+
+                <!-- Modell-Auswahl für ML Backend -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Modell</label>
+                    <select id="ml-model-select" class="w-full border rounded px-3 py-2 text-sm">
+                        <option value="">Aktives Modell verwenden</option>
+                    </select>
+                </div>
+
+                <!-- Confidence -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Confidence Threshold</label>
+                    <input type="range" id="ml-confidence" min="0.1" max="0.9" step="0.05" value="0.25"
+                           class="w-full" oninput="document.getElementById('ml-conf-value').textContent = this.value">
+                    <div class="flex justify-between text-xs text-gray-500">
+                        <span>0.1</span>
+                        <span id="ml-conf-value">0.25</span>
+                        <span>0.9</span>
+                    </div>
+                </div>
+
+                <div class="flex gap-2">
+                    <button id="ml-start-btn" onclick="startMLBackend()"
+                            class="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm">
+                        Starten
+                    </button>
+                    <button id="ml-stop-btn" onclick="stopMLBackend()"
+                            class="flex-1 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-sm hidden">
+                        Stoppen
+                    </button>
+                </div>
+
+                <div id="ml-backend-info" class="mt-4 p-3 bg-blue-50 rounded text-sm hidden">
+                    <p class="font-medium text-blue-800 mb-1">In Label Studio verbinden:</p>
+                    <ol class="text-blue-700 text-xs space-y-1 list-decimal list-inside">
+                        <li>Projekt öffnen → Settings → Model</li>
+                        <li>Connect Model klicken</li>
+                        <li>URL eingeben: <code id="ml-connect-url" class="bg-blue-100 px-1 rounded">http://localhost:9090</code></li>
+                        <li>Speichern</li>
+                    </ol>
+                </div>
+            </div>
+
             <!-- Modell-Empfehlungen -->
             <div class="bg-white rounded-lg shadow p-6">
                 <h2 class="text-lg font-semibold mb-4">Modell-Guide</h2>
@@ -758,5 +815,127 @@ if (runningTrainings.length > 0) {
     fetchLiveLogs();
     setInterval(fetchLiveLogs, 3000); // Alle 3 Sekunden
 }
+
+// ========================================
+// ML Backend Funktionen
+// ========================================
+
+async function checkMLBackendStatus() {
+    try {
+        const response = await fetch('/training/api/ml-backend/status');
+        const data = await response.json();
+
+        const indicator = document.getElementById('ml-status-indicator');
+        const text = document.getElementById('ml-status-text');
+        const urlDiv = document.getElementById('ml-backend-url');
+        const startBtn = document.getElementById('ml-start-btn');
+        const stopBtn = document.getElementById('ml-stop-btn');
+        const infoDiv = document.getElementById('ml-backend-info');
+        const modelSelect = document.getElementById('ml-model-select');
+
+        // Modell-Dropdown aktualisieren
+        if (data.available_models && modelSelect.options.length <= 1) {
+            data.available_models.forEach(model => {
+                const option = document.createElement('option');
+                option.value = model.path;
+                option.textContent = model.name;
+                modelSelect.appendChild(option);
+            });
+        }
+
+        if (data.running) {
+            indicator.className = 'w-3 h-3 rounded-full bg-green-500 animate-pulse';
+            text.textContent = 'Läuft';
+            text.className = 'text-sm text-green-600 font-medium';
+
+            urlDiv.textContent = data.url;
+            urlDiv.classList.remove('hidden');
+
+            startBtn.classList.add('hidden');
+            stopBtn.classList.remove('hidden');
+
+            infoDiv.classList.remove('hidden');
+            document.getElementById('ml-connect-url').textContent = data.url;
+
+            if (data.model_info) {
+                text.textContent = `Läuft (${Object.keys(data.model_info.classes || {}).length} Klassen)`;
+            }
+        } else {
+            indicator.className = 'w-3 h-3 rounded-full bg-gray-400';
+            text.textContent = 'Gestoppt';
+            text.className = 'text-sm text-gray-600';
+
+            urlDiv.classList.add('hidden');
+            startBtn.classList.remove('hidden');
+            stopBtn.classList.add('hidden');
+            infoDiv.classList.add('hidden');
+        }
+    } catch (e) {
+        console.error('ML Backend Status Fehler:', e);
+    }
+}
+
+async function startMLBackend() {
+    const btn = document.getElementById('ml-start-btn');
+    btn.disabled = true;
+    btn.textContent = 'Starte...';
+
+    const modelPath = document.getElementById('ml-model-select').value;
+    const confidence = parseFloat(document.getElementById('ml-confidence').value);
+
+    try {
+        const response = await fetch('/training/api/ml-backend/start', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                model_path: modelPath || null,
+                confidence: confidence,
+                port: 9090
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            checkMLBackendStatus();
+        } else {
+            alert('Fehler: ' + (data.error || 'Unbekannt'));
+        }
+    } catch (e) {
+        alert('Fehler: ' + e.message);
+    }
+
+    btn.disabled = false;
+    btn.textContent = 'Starten';
+}
+
+async function stopMLBackend() {
+    const btn = document.getElementById('ml-stop-btn');
+    btn.disabled = true;
+    btn.textContent = 'Stoppe...';
+
+    try {
+        const response = await fetch('/training/api/ml-backend/stop', {
+            method: 'POST'
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            checkMLBackendStatus();
+        } else {
+            alert('Fehler: ' + (data.error || 'Unbekannt'));
+        }
+    } catch (e) {
+        alert('Fehler: ' + e.message);
+    }
+
+    btn.disabled = false;
+    btn.textContent = 'Stoppen';
+}
+
+// Initial Status prüfen und regelmässig aktualisieren
+checkMLBackendStatus();
+setInterval(checkMLBackendStatus, 10000); // Alle 10 Sekunden
 </script>
 {% endblock %}
