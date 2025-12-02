@@ -185,9 +185,10 @@ class LabelingBatch(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id = Column(UUID(as_uuid=True), ForeignKey("labeling_projects.id"), nullable=False)
+    video_id = Column(UUID(as_uuid=True), ForeignKey("videos.id"))  # Quelle-Video
 
     # Batch-Info
-    batch_id = Column(String(50), nullable=False)  # Lokale Batch-ID
+    batch_id = Column(String(50), nullable=False)  # Lokale Batch-ID / Name
     num_frames = Column(Integer, default=0)
 
     # Pfad zu den Frames
@@ -207,6 +208,7 @@ class LabelingBatch(Base):
 
     # Relationships
     project = relationship("LabelingProject", back_populates="batches")
+    video = relationship("Video")
 
 
 class TrainingRun(Base):
@@ -370,4 +372,68 @@ class PlayerPosition(Base):
     __table_args__ = (
         Index("ix_player_positions_job_frame", "analysis_job_id", "frame_number"),
         Index("ix_player_positions_job_track", "analysis_job_id", "track_id"),
+    )
+
+
+class GamePeriod(Base):
+    """
+    Spielzeit-Definition
+
+    Speichert die definierten Spielzeiten (ohne Pausen) für ein Video.
+    """
+    __tablename__ = "game_periods"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    video_id = Column(UUID(as_uuid=True), ForeignKey("videos.id"), nullable=False)
+
+    # Zeitbereich
+    start_time = Column(Float, nullable=False)  # Sekunden
+    end_time = Column(Float, nullable=False)    # Sekunden
+
+    # Sortierung
+    period_index = Column(Integer, default=0)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationship
+    video = relationship("Video", backref="game_periods")
+
+
+class AnalysisChunk(Base):
+    """
+    Analyse-Chunk
+
+    Speichert den Status eines 1-Minuten-Chunks der Spielanalyse.
+    Ermöglicht Resume bei Abbruch.
+    """
+    __tablename__ = "analysis_chunks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    video_id = Column(UUID(as_uuid=True), ForeignKey("videos.id"), nullable=False)
+
+    # Chunk-Info
+    chunk_index = Column(Integer, nullable=False)
+    start_time = Column(Float, nullable=False)
+    end_time = Column(Float, nullable=False)
+
+    # Status: pending, running, completed, error
+    status = Column(String(20), default="pending")
+    error_message = Column(Text)
+
+    # Ergebnisse
+    frames_processed = Column(Integer, default=0)
+    detections_count = Column(Integer, default=0)
+    processing_time = Column(Float)  # Sekunden für Verarbeitung
+
+    # Timestamps
+    started_at = Column(DateTime)
+    completed_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationship
+    video = relationship("Video", backref="analysis_chunks")
+
+    __table_args__ = (
+        Index("ix_analysis_chunks_video_index", "video_id", "chunk_index"),
     )

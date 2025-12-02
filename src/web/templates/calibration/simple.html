@@ -116,9 +116,14 @@
             <a href="{{ url_for('calibration.index') }}" class="text-blue-500 hover:underline text-sm">
                 &larr; Zurück zur Übersicht
             </a>
-            <h1 class="text-2xl font-bold mt-2">Kalibrierung: {{ video.filename or video.original_filename }}</h1>
+            {% if edit_mode and calibration %}
+            <h1 class="text-2xl font-bold mt-2">Kalibrierung bearbeiten: {{ calibration.name or 'Unbenannt' }}</h1>
+            <p class="text-sm text-gray-500">Video: {{ video.original_filename or video.filename }}</p>
+            {% else %}
+            <h1 class="text-2xl font-bold mt-2">Neue Kalibrierung: {{ video.original_filename or video.filename }}</h1>
+            {% endif %}
         </div>
-        {% if calibration %}
+        {% if calibration and not edit_mode %}
         <div class="flex items-center gap-4">
             <span class="text-sm text-gray-500">Bestehende Kalibrierung: {{ calibration.name }}</span>
             <button onclick="enterReviewMode()" class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 flex items-center gap-2">
@@ -147,6 +152,17 @@
             </div>
 
             <div id="step1-content" class="mt-4">
+                <!-- Kalibrierungsname -->
+                <div class="mb-4">
+                    <label for="calibration-name" class="block text-sm font-medium text-gray-700 mb-1">
+                        Name der Kalibrierung
+                    </label>
+                    <input type="text" id="calibration-name"
+                           placeholder="z.B. Hauptkamera Mitte, Seitenkamera Links..."
+                           value="{{ calibration.name or '' if calibration else '' }}"
+                           class="w-full max-w-md px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                </div>
+
                 <p class="text-gray-600 mb-4">
                     Wähle einen oder mehrere Screenshots aus dem Video. Längeres Hovern zeigt eine grössere Vorschau.
                 </p>
@@ -544,6 +560,7 @@ const videoId = '{{ video.id }}';
 const existingCalibration = {{ calibration.calibration_data | tojson | safe if calibration and calibration.calibration_data else 'null' }};
 const existingCalibrationId = {{ calibration.id | tojson | safe if calibration else 'null' }};
 const existingCalibrationName = {{ calibration.name | tojson | safe if calibration else 'null' }};
+const editMode = {{ 'true' if edit_mode else 'false' }};
 let currentStep = 1;
 let screenshots = [];
 let selectedScreenshotIndices = [];  // Mehrfachauswahl
@@ -597,6 +614,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Falls bestehende Kalibrierung: Parameter laden
     if (existingCalibration) {
         loadExistingCalibrationParams();
+    }
+
+    // Im Edit-Modus automatisch die bestehende Kalibrierung laden und anzeigen
+    if (editMode && existingCalibration) {
+        console.log('Edit mode: entering review mode to load existing calibration');
+        await enterReviewMode();
     }
 });
 
@@ -2351,6 +2374,11 @@ async function saveCalibration() {
         name: name
     };
 
+    // Im Edit-Modus die bestehende Kalibrierung aktualisieren
+    if (editMode && existingCalibrationId) {
+        requestBody.calibration_id = existingCalibrationId;
+    }
+
     // Undistort-Parameter für Reproduzierbarkeit hinzufügen
     requestBody.undistort_params = {
         is_custom: savedUndistortParams.isCustom,
@@ -2377,7 +2405,8 @@ async function saveCalibration() {
             // WIP-Daten löschen nach erfolgreichem Speichern
             await deleteWipData();
 
-            alert('Kalibrierung gespeichert!\n\nJSON exportiert nach:\n' + (result.json_path || 'data/calibration/'));
+            const action = editMode ? 'aktualisiert' : 'gespeichert';
+            alert(`Kalibrierung ${action}!\n\nJSON exportiert nach:\n` + (result.json_path || 'data/calibration/'));
             window.location.href = '{{ url_for("calibration.index") }}';
         } else {
             alert('Fehler: ' + result.error);

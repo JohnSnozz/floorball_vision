@@ -50,20 +50,68 @@
                         <select id="model-select" name="base_model" required
                                 class="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
                                 onchange="updateModelInfo()">
-                            <optgroup label="YOLOv8 (Empfohlen)">
+                            <optgroup label="YOLO11 (Neueste Generation)">
+                                {% for model_id, model in yolo_models.items() if model_id.startswith('yolo11') %}
+                                <option value="models/pretrained/{{ model_id }}"
+                                        data-description="{{ model.description }}"
+                                        data-params="{{ model.params }}"
+                                        data-speed="{{ model.speed }}"
+                                        data-map="{{ model.map_coco }}"
+                                        data-recommended="{{ model.recommended_for | join(', ') }}"
+                                        {% if model_id == 'yolo11s.pt' %}selected{% endif %}>
+                                    {{ model.name }} ({{ model.params }}, {{ model.speed }})
+                                </option>
+                                {% endfor %}
+                            </optgroup>
+                            <optgroup label="YOLOv10 (NMS-frei)">
+                                {% for model_id, model in yolo_models.items() if model_id.startswith('yolov10') %}
+                                <option value="models/pretrained/{{ model_id }}"
+                                        data-description="{{ model.description }}"
+                                        data-params="{{ model.params }}"
+                                        data-speed="{{ model.speed }}"
+                                        data-map="{{ model.map_coco }}"
+                                        data-recommended="{{ model.recommended_for | join(', ') }}">
+                                    {{ model.name }} ({{ model.params }}, {{ model.speed }})
+                                </option>
+                                {% endfor %}
+                            </optgroup>
+                            <optgroup label="YOLOv9">
+                                {% for model_id, model in yolo_models.items() if model_id.startswith('yolov9') %}
+                                <option value="models/pretrained/{{ model_id }}"
+                                        data-description="{{ model.description }}"
+                                        data-params="{{ model.params }}"
+                                        data-speed="{{ model.speed }}"
+                                        data-map="{{ model.map_coco }}"
+                                        data-recommended="{{ model.recommended_for | join(', ') }}">
+                                    {{ model.name }} ({{ model.params }}, {{ model.speed }})
+                                </option>
+                                {% endfor %}
+                            </optgroup>
+                            <optgroup label="RT-DETR (Transformer)">
+                                {% for model_id, model in yolo_models.items() if model_id.startswith('rtdetr') %}
+                                <option value="models/pretrained/{{ model_id }}"
+                                        data-description="{{ model.description }}"
+                                        data-params="{{ model.params }}"
+                                        data-speed="{{ model.speed }}"
+                                        data-map="{{ model.map_coco }}"
+                                        data-recommended="{{ model.recommended_for | join(', ') }}">
+                                    {{ model.name }} ({{ model.params }}, {{ model.speed }})
+                                </option>
+                                {% endfor %}
+                            </optgroup>
+                            <optgroup label="YOLOv8">
                                 {% for model_id, model in yolo_models.items() if model_id.startswith('yolov8') %}
                                 <option value="{{ model_id }}"
                                         data-description="{{ model.description }}"
                                         data-params="{{ model.params }}"
                                         data-speed="{{ model.speed }}"
                                         data-map="{{ model.map_coco }}"
-                                        data-recommended="{{ model.recommended_for | join(', ') }}"
-                                        {% if model_id == 'yolov8s.pt' %}selected{% endif %}>
+                                        data-recommended="{{ model.recommended_for | join(', ') }}">
                                     {{ model.name }} ({{ model.params }}, {{ model.speed }})
                                 </option>
                                 {% endfor %}
                             </optgroup>
-                            <optgroup label="YOLOv5 (Alternative)">
+                            <optgroup label="YOLOv5 (Legacy)">
                                 {% for model_id, model in yolo_models.items() if model_id.startswith('yolov5') %}
                                 <option value="{{ model_id }}"
                                         data-description="{{ model.description }}"

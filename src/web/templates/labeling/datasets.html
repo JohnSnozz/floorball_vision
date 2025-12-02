@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+
+{% block title %}Datasets - Floorball Vision{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <div class="flex items-center justify-between mb-8">
+        <div>
+            <a href="{{ url_for('labeling.index') }}" class="text-blue-600 hover:underline text-sm">&larr; Zurück zu Labeling</a>
+            <h1 class="text-3xl font-bold mt-2">Datasets</h1>
+            <p class="text-gray-500">Exportierte Label-Datensätze verwalten</p>
+        </div>
+    </div>
+
+    <!-- Datasets Liste -->
+    <div class="bg-white rounded-lg shadow">
+        <div class="p-4 border-b">
+            <div class="flex items-center justify-between">
+                <h2 class="text-lg font-semibold">Verfügbare Datasets</h2>
+                <span id="dataset-count" class="text-sm text-gray-500"></span>
+            </div>
+        </div>
+
+        <div id="datasets-loading" class="p-8 text-center text-gray-500">
+            Lade Datasets...
+        </div>
+
+        <div id="datasets-empty" class="hidden p-8 text-center text-gray-500">
+            Keine Datasets vorhanden. Exportiere zuerst Labels aus einem Labeling-Projekt.
+        </div>
+
+        <div id="datasets-list" class="hidden divide-y">
+            <!-- Wird per JavaScript gefüllt -->
+        </div>
+    </div>
+</div>
+
+<script>
+// Datasets laden
+async function loadDatasets() {
+    const loading = document.getElementById('datasets-loading');
+    const empty = document.getElementById('datasets-empty');
+    const list = document.getElementById('datasets-list');
+    const count = document.getElementById('dataset-count');
+
+    try {
+        const response = await fetch('/training/api/datasets');
+        const datasets = await response.json();
+
+        loading.classList.add('hidden');
+
+        if (datasets.length === 0) {
+            empty.classList.remove('hidden');
+            count.textContent = '0 Datasets';
+            return;
+        }
+
+        count.textContent = `${datasets.length} Dataset${datasets.length !== 1 ? 's' : ''}`;
+
+        list.innerHTML = datasets.map(ds => `
+            <div class="p-4 hover:bg-gray-50" data-dataset="${ds.name}">
+                <div class="flex items-start justify-between">
+                    <div class="flex-1">
+                        <div class="flex items-center gap-2">
+                            <h3 class="font-semibold text-lg dataset-name">${ds.name}</h3>
+                            <button onclick="renameDataset('${ds.name}')"
+                                    class="text-gray-400 hover:text-blue-600 text-sm" title="Umbenennen">
+                                &#9998;
+                            </button>
+                        </div>
+                        <div class="mt-1 flex flex-wrap gap-4 text-sm text-gray-600">
+                            <span title="Bilder">${ds.images} Bilder</span>
+                            <span title="Labels">${ds.labels} Labels</span>
+                            <span title="Grösse">${ds.size_mb} MB</span>
+                            ${ds.has_split ? '<span class="text-green-600" title="Train/Val Split vorhanden">Split</span>' : ''}
+                        </div>
+                        <div class="mt-2 flex flex-wrap gap-1">
+                            ${ds.classes.map(c => `
+                                <span class="px-2 py-0.5 bg-gray-100 text-gray-700 text-xs rounded">${c}</span>
+                            `).join('')}
+                        </div>
+                        <div class="mt-2 text-xs text-gray-400">
+                            Erstellt: ${new Date(ds.created_at).toLocaleString('de-CH')}
+                        </div>
+                    </div>
+                    <div class="flex gap-2 ml-4">
+                        <button onclick="deleteDataset('${ds.name}')"
+                                class="px-3 py-1 bg-red-100 text-red-700 text-sm rounded hover:bg-red-200">
+                            Löschen
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+
+        list.classList.remove('hidden');
+
+    } catch (err) {
+        loading.textContent = 'Fehler beim Laden: ' + err.message;
+    }
+}
+
+// Dataset umbenennen
+async function renameDataset(name) {
+    const newName = prompt('Neuer Name für das Dataset:', name);
+    if (!newName || newName === name) return;
+
+    try {
+        const response = await fetch(`/training/api/datasets/${encodeURIComponent(name)}/rename`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ new_name: newName })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // UI aktualisieren
+            const row = document.querySelector(`[data-dataset="${name}"]`);
+            if (row) {
+                row.dataset.dataset = result.new_name;
+                row.querySelector('.dataset-name').textContent = result.new_name;
+                // Buttons aktualisieren
+                row.querySelector('button[onclick*="renameDataset"]').setAttribute('onclick', `renameDataset('${result.new_name}')`);
+                row.querySelector('button[onclick*="deleteDataset"]').setAttribute('onclick', `deleteDataset('${result.new_name}')`);
+            }
+        } else {
+            alert('Fehler: ' + result.error);
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+
+// Dataset löschen
+async function deleteDataset(name) {
+    if (!confirm(`Dataset "${name}" wirklich löschen?\n\nDies löscht alle Bilder und Labels unwiderruflich!`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/training/api/datasets/${encodeURIComponent(name)}`, {
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // Zeile entfernen
+            const row = document.querySelector(`[data-dataset="${name}"]`);
+            if (row) {
+                row.remove();
+            }
+            // Count aktualisieren
+            const remaining = document.querySelectorAll('[data-dataset]').length;
+            document.getElementById('dataset-count').textContent = `${remaining} Dataset${remaining !== 1 ? 's' : ''}`;
+            if (remaining === 0) {
+                document.getElementById('datasets-list').classList.add('hidden');
+                document.getElementById('datasets-empty').classList.remove('hidden');
+            }
+        } else {
+            alert('Fehler: ' + result.error);
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+
+// Beim Laden
+document.addEventListener('DOMContentLoaded', loadDatasets);
+</script>
+{% endblock %}

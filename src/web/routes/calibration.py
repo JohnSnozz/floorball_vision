@@ -76,21 +76,38 @@ def quick_calibration(video_id):
 
 
 @calibration_bp.route("/video/<video_id>/simple")
-def simple_calibration(video_id):
-    """Neue vereinfachte Kalibrierung mit 5-Schritt-Workflow."""
+@calibration_bp.route("/video/<video_id>/simple/<calibration_id>")
+def simple_calibration(video_id, calibration_id=None):
+    """Neue vereinfachte Kalibrierung mit 5-Schritt-Workflow.
+
+    Wenn calibration_id übergeben wird, werden die bestehenden
+    Kalibrierungsdaten zum Bearbeiten geladen.
+    """
     video = db.session.get(Video, video_id)
     if not video:
         abort(404)
 
-    calibration = db.session.query(Calibration).filter_by(
-        video_id=video.id,
-        is_active=True
-    ).first()
+    calibration = None
+    if calibration_id:
+        # Spezifische Kalibrierung zum Bearbeiten laden
+        calibration = db.session.get(Calibration, calibration_id)
+        if not calibration or calibration.video_id != video.id:
+            abort(404)
+    else:
+        # Aktive Kalibrierung laden falls vorhanden (für Review-Button)
+        calibration = db.session.query(Calibration).filter_by(
+            video_id=video.id,
+            is_active=True
+        ).first()
+
+    # edit_mode zeigt an, ob wir eine bestehende Kalibrierung bearbeiten
+    edit_mode = calibration_id is not None
 
     return render_template(
         "calibration/simple.html",
         video=video,
-        calibration=calibration
+        calibration=calibration,
+        edit_mode=edit_mode
     )
 
 
@@ -1100,6 +1117,50 @@ def api_delete_calibration(calibration_id):
     return jsonify({"success": True})
 
 
+@calibration_bp.route("/api/calibrations/<calibration_id>/activate", methods=["POST"])
+def api_activate_calibration(calibration_id):
+    """Aktiviert eine Kalibrierung und deaktiviert alle anderen für dieses Video."""
+    calibration = db.session.get(Calibration, calibration_id)
+    if not calibration:
+        return jsonify({"error": "Kalibrierung nicht gefunden"}), 404
+
+    # Alle anderen Kalibrierungen für dieses Video deaktivieren
+    db.session.query(Calibration).filter(
+        Calibration.video_id == calibration.video_id,
+        Calibration.id != calibration.id
+    ).update({"is_active": False})
+
+    # Diese Kalibrierung aktivieren
+    calibration.is_active = True
+    db.session.commit()
+
+    return jsonify({
+        "success": True,
+        "calibration_id": str(calibration.id),
+        "name": calibration.name
+    })
+
+
+@calibration_bp.route("/api/calibrations/<calibration_id>/rename", methods=["POST"])
+def api_rename_calibration(calibration_id):
+    """Benennt eine Kalibrierung um."""
+    calibration = db.session.get(Calibration, calibration_id)
+    if not calibration:
+        return jsonify({"error": "Kalibrierung nicht gefunden"}), 404
+
+    data = request.get_json() or {}
+    new_name = data.get("name", "").strip()
+
+    calibration.name = new_name if new_name else None
+    db.session.commit()
+
+    return jsonify({
+        "success": True,
+        "calibration_id": str(calibration.id),
+        "name": calibration.name
+    })
+
+
 # === Lens Profile API ===
 
 @calibration_bp.route("/api/lens-profiles")
@@ -1917,6 +1978,7 @@ def api_calibration_save(video_id):
     lens_profile_id = data.get("lens_profile_id")
     undistort_params = data.get("undistort_params", {})
     name = data.get("name", "Kalibrierung")
+    calibration_id = data.get("calibration_id")  # Optional: ID für Update
 
     if len(point_pairs) < 4:
         return jsonify({"error": "Mindestens 4 Punkt-Paare erforderlich"}), 400
@@ -1931,12 +1993,6 @@ def api_calibration_save(video_id):
 
         if homography is None:
             return jsonify({"error": "Homography konnte nicht berechnet werden"}), 500
-
-        # Bestehende Kalibrierung deaktivieren
-        db.session.query(Calibration).filter_by(
-            video_id=video.id,
-            is_active=True
-        ).update({"is_active": False})
 
         # Kalibrierungsdaten zusammenstellen
         calibration_data = {
@@ -1953,13 +2009,30 @@ def api_calibration_save(video_id):
         if undistort_params:
             calibration_data["undistort_params"] = undistort_params
 
-        # Neue Kalibrierung erstellen
-        calibration = Calibration(
-            video_id=video.id,
-            is_active=True,
-            calibration_data=calibration_data
-        )
-        db.session.add(calibration)
+        # Bestehende Kalibrierung aktualisieren oder neue erstellen
+        if calibration_id:
+            # Update: Bestehende Kalibrierung aktualisieren
+            calibration = db.session.get(Calibration, calibration_id)
+            if not calibration or calibration.video_id != video.id:
+                return jsonify({"error": "Kalibrierung nicht gefunden"}), 404
+
+            calibration.calibration_data = calibration_data
+            calibration.name = name
+        else:
+            # Neue Kalibrierung: Andere deaktivieren
+            db.session.query(Calibration).filter_by(
+                video_id=video.id,
+                is_active=True
+            ).update({"is_active": False})
+
+            calibration = Calibration(
+                video_id=video.id,
+                is_active=True,
+                name=name,
+                calibration_data=calibration_data
+            )
+            db.session.add(calibration)
+
         db.session.commit()
 
         # JSON-Datei speichern für einfachen Zugriff/Export

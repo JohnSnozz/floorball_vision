@@ -1,0 +1,22 @@
+# BoT-SORT mit Re-ID Konfiguration für Floorball Vision
+# Beste Tracking-Qualität, aber langsamer und GPU-intensiver
+# Ideal für: Offline-Analyse, komplexe Szenen mit vielen Verdeckungen
+
+tracker_type: botsort
+
+# === Matching Thresholds ===
+track_high_thresh: 0.25
+track_low_thresh: 0.1
+new_track_thresh: 0.25
+match_thresh: 0.8
+track_buffer: 45         # Längerer Buffer für Re-ID
+fuse_score: True
+
+# === BoT-SORT Spezifisch ===
+gmc_method: sparseOptFlow
+
+# === Re-ID AKTIVIERT ===
+with_reid: True          # Re-ID aktiviert!
+proximity_thresh: 0.5
+appearance_thresh: 0.75  # Etwas niedriger für mehr Re-ID Matches
+model: auto

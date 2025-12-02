@@ -79,6 +79,192 @@ models:
       - "Offline-Analyse"
       - "High-End GPU"
 
+  # === YOLO11 Models (Neueste Generation) ===
+  yolo11n.pt:
+    name: "YOLO11 Nano"
+    category: "detection"
+    size: "nano"
+    params: "2.6M"
+    speed: "~1.5ms"
+    map_coco: "39.5"
+    description: "Neueste YOLO-Generation. Schnellstes Modell mit verbesserter Architektur."
+    recommended_for:
+      - "Echtzeit-Tracking"
+      - "Beste Nano-Performance"
+      - "Moderne Architektur"
+
+  yolo11s.pt:
+    name: "YOLO11 Small"
+    category: "detection"
+    size: "small"
+    params: "9.4M"
+    speed: "~2.5ms"
+    map_coco: "47.0"
+    description: "Neueste YOLO-Generation. Beste Balance aus Geschwindigkeit und Genauigkeit."
+    recommended_for:
+      - "Standard Tracking"
+      - "Empfohlenes Modell"
+      - "Gute Allround-Performance"
+
+  yolo11m.pt:
+    name: "YOLO11 Medium"
+    category: "detection"
+    size: "medium"
+    params: "20.1M"
+    speed: "~4.5ms"
+    map_coco: "51.5"
+    description: "Neueste YOLO-Generation. Höhere Genauigkeit für anspruchsvolle Szenen."
+    recommended_for:
+      - "Präzises Tracking"
+      - "Komplexe Szenen"
+      - "Gute GPU"
+
+  yolo11l.pt:
+    name: "YOLO11 Large"
+    category: "detection"
+    size: "large"
+    params: "25.3M"
+    speed: "~6ms"
+    map_coco: "53.4"
+    description: "Neueste YOLO-Generation. Hohe Genauigkeit auch bei kleinen Objekten."
+    recommended_for:
+      - "Ball-Tracking"
+      - "Kleine Objekte"
+      - "Hohe Genauigkeit"
+
+  yolo11x.pt:
+    name: "YOLO11 Extra-Large"
+    category: "detection"
+    size: "xlarge"
+    params: "56.9M"
+    speed: "~11ms"
+    map_coco: "54.7"
+    description: "Neueste YOLO-Generation. Maximale Genauigkeit für Offline-Analysen."
+    recommended_for:
+      - "Maximale Genauigkeit"
+      - "Offline-Analyse"
+      - "High-End GPU"
+
+  # === YOLOv10 Models (NMS-frei, effizient) ===
+  yolov10n.pt:
+    name: "YOLOv10 Nano"
+    category: "detection"
+    size: "nano"
+    params: "2.3M"
+    speed: "~1.2ms"
+    map_coco: "38.5"
+    description: "NMS-freie Architektur. Extrem schnelle Inferenz ohne Post-Processing."
+    recommended_for:
+      - "Maximale Geschwindigkeit"
+      - "Edge Deployment"
+      - "Latenz-kritisch"
+
+  yolov10s.pt:
+    name: "YOLOv10 Small"
+    category: "detection"
+    size: "small"
+    params: "7.2M"
+    speed: "~2.0ms"
+    map_coco: "46.3"
+    description: "NMS-freie Architektur. Schneller als v8 bei ähnlicher Genauigkeit."
+    recommended_for:
+      - "Effizientes Tracking"
+      - "Niedrige Latenz"
+      - "Gute Balance"
+
+  yolov10m.pt:
+    name: "YOLOv10 Medium"
+    category: "detection"
+    size: "medium"
+    params: "15.4M"
+    speed: "~4.5ms"
+    map_coco: "51.1"
+    description: "NMS-freie Architektur. Gute Genauigkeit bei niedriger Latenz."
+    recommended_for:
+      - "Präzises Tracking"
+      - "End-to-End Inferenz"
+      - "Mittlere Hardware"
+
+  yolov10l.pt:
+    name: "YOLOv10 Large"
+    category: "detection"
+    size: "large"
+    params: "24.4M"
+    speed: "~7ms"
+    map_coco: "53.2"
+    description: "NMS-freie Architektur. Hohe Genauigkeit ohne Post-Processing."
+    recommended_for:
+      - "Hohe Genauigkeit"
+      - "Keine NMS nötig"
+      - "Gute GPU"
+
+  yolov10x.pt:
+    name: "YOLOv10 Extra-Large"
+    category: "detection"
+    size: "xlarge"
+    params: "29.5M"
+    speed: "~10ms"
+    map_coco: "54.4"
+    description: "NMS-freie Architektur. Maximale Genauigkeit der v10-Serie."
+    recommended_for:
+      - "Maximale Genauigkeit"
+      - "Offline-Analyse"
+      - "High-End GPU"
+
+  # === YOLOv9 Models (PGI-Architektur) ===
+  yolov9c.pt:
+    name: "YOLOv9 Compact"
+    category: "detection"
+    size: "medium"
+    params: "25.3M"
+    speed: "~5ms"
+    map_coco: "53.0"
+    description: "PGI-Architektur (Programmable Gradient Information). Sehr gute Genauigkeit."
+    recommended_for:
+      - "Hohe Genauigkeit"
+      - "Komplexe Szenen"
+      - "Moderne GPU"
+
+  yolov9e.pt:
+    name: "YOLOv9 Extended"
+    category: "detection"
+    size: "xlarge"
+    params: "57.3M"
+    speed: "~15ms"
+    map_coco: "55.6"
+    description: "PGI-Architektur. Grösstes YOLOv9 Modell mit bester Genauigkeit."
+    recommended_for:
+      - "Maximale Genauigkeit"
+      - "Offline-Analyse"
+      - "State-of-the-Art"
+
+  # === RT-DETR Models (Transformer-basiert) ===
+  rtdetr-l.pt:
+    name: "RT-DETR Large"
+    category: "detection"
+    size: "large"
+    params: "32M"
+    speed: "~9ms"
+    map_coco: "53.0"
+    description: "Real-Time Detection Transformer. Besser bei Überlappungen und Verdeckungen."
+    recommended_for:
+      - "Spieler-Überlappungen"
+      - "Verdeckte Objekte"
+      - "Transformer-Architektur"
+
+  rtdetr-x.pt:
+    name: "RT-DETR Extra-Large"
+    category: "detection"
+    size: "xlarge"
+    params: "67M"
+    speed: "~17ms"
+    map_coco: "54.8"
+    description: "Real-Time Detection Transformer. Maximale Genauigkeit bei Transformer-Architektur."
+    recommended_for:
+      - "Maximale Genauigkeit"
+      - "Komplexe Überlappungen"
+      - "High-End GPU"
+
   # === YOLOv5 Models (Alternative, bewährt) ===
   yolov5n.pt:
     name: "YOLOv5 Nano"
@@ -195,3 +381,59 @@ augmentation_presets:
     mosaic: 1.0
     mixup: 0.3
     copy_paste: 0.3
+
+# === Tracker Konfigurationen ===
+# Diese Tracker werden NICHT trainiert - sie verwenden algorithmisches Matching
+# Nur der YOLO-Detektor wird mit deinen Daten trainiert!
+trackers:
+  bytetrack:
+    name: "ByteTrack"
+    config: "configs/trackers/bytetrack.yaml"
+    description: "Klassischer Tracker mit Kalman Filter und IoU-Matching. Schnell und robust."
+    features:
+      - "Kalman Filter für Bewegungsvorhersage"
+      - "IoU-basiertes Matching"
+      - "Zwei-Stufen-Association"
+    recommended_for:
+      - "Standard Tracking"
+      - "Schnelle Inferenz"
+      - "Einfache Szenen"
+    speed: "Schnell"
+    gpu_usage: "Niedrig"
+
+  botsort:
+    name: "BoT-SORT"
+    config: "configs/trackers/botsort.yaml"
+    description: "Erweiterter Tracker mit Global Motion Compensation. Besser bei Kamerabewegung."
+    features:
+      - "Kalman Filter + GMC"
+      - "Sparse Optical Flow"
+      - "Kamerabewegung-Kompensation"
+    recommended_for:
+      - "Bewegte Kamera"
+      - "Komplexe Szenen"
+      - "Bessere Stabilität"
+    speed: "Mittel"
+    gpu_usage: "Mittel"
+
+  botsort_reid:
+    name: "BoT-SORT + Re-ID"
+    config: "configs/trackers/botsort_reid.yaml"
+    description: "BoT-SORT mit Re-Identification. Findet Spieler nach Verdeckung wieder."
+    features:
+      - "Alles von BoT-SORT"
+      - "Appearance-basiertes Re-ID"
+      - "Beste Tracking-Kontinuität"
+    recommended_for:
+      - "Viele Verdeckungen"
+      - "Offline-Analyse"
+      - "Maximale Qualität"
+    speed: "Langsam"
+    gpu_usage: "Hoch"
+
+# Tracker-Empfehlungen
+tracker_recommendations:
+  default: "bytetrack"
+  realtime: "bytetrack"
+  quality: "botsort_reid"
+  moving_camera: "botsort"

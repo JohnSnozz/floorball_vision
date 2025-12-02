@@ -92,8 +92,8 @@
             </div>
         </div>
         <div class="flex-shrink-0 flex gap-2">
-            <button class="btn-analyze px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 hidden">
-                Analysieren
+            <button class="btn-preview px-3 py-1 bg-gray-600 text-white text-sm rounded hover:bg-gray-700 hidden">
+                Preview
             </button>
             <button class="btn-delete px-3 py-1 bg-red-100 text-red-700 text-sm rounded hover:bg-red-200">
                 Löschen
@@ -101,4 +101,27 @@
         </div>
     </div>
 </template>
+
+<!-- Video Preview Modal -->
+<div id="preview-modal" class="fixed inset-0 bg-black bg-opacity-75 hidden z-50 flex items-center justify-center">
+    <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-3 border-b bg-gray-50">
+            <h3 id="preview-title" class="font-semibold text-gray-900">Video Preview</h3>
+            <button id="preview-close" class="text-gray-500 hover:text-gray-700 text-2xl leading-none">&times;</button>
+        </div>
+        <div class="bg-black">
+            <video id="preview-player" class="w-full max-h-[70vh]" controls>
+                <source id="preview-source" src="" type="video/mp4">
+            </video>
+        </div>
+        <div class="px-4 py-3 bg-gray-50 flex items-center justify-between">
+            <div id="preview-meta" class="text-sm text-gray-600"></div>
+            <div class="flex gap-2">
+                <button id="preview-fullscreen" class="px-3 py-1 bg-gray-200 text-gray-700 text-sm rounded hover:bg-gray-300">
+                    Vollbild
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}

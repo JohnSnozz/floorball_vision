@@ -225,12 +225,12 @@ document.addEventListener('DOMContentLoaded', () => {
         thumb.src = '/static/img/video-placeholder.svg';
         thumb.alt = video.original_filename || 'Video';
 
-        // Analyse Button (nur wenn ready)
-        const analyzeBtn = item.querySelector('.btn-analyze');
+        // Preview Button (nur wenn ready)
+        const previewBtn = item.querySelector('.btn-preview');
         if (video.status === 'ready') {
-            analyzeBtn.classList.remove('hidden');
-            analyzeBtn.addEventListener('click', () => {
-                window.location.href = `/analysis/${video.id}`;
+            previewBtn.classList.remove('hidden');
+            previewBtn.addEventListener('click', () => {
+                openVideoPreview(video);
             });
         }
 
@@ -264,6 +264,87 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${m}:${s.toString().padStart(2, '0')}`;
     }
 
+    /**
+     * Video Preview Modal öffnen
+     */
+    function openVideoPreview(video) {
+        const modal = document.getElementById('preview-modal');
+        const player = document.getElementById('preview-player');
+        const source = document.getElementById('preview-source');
+        const title = document.getElementById('preview-title');
+        const meta = document.getElementById('preview-meta');
+
+        if (!modal || !player || !source) return;
+
+        // Video-Daten setzen
+        title.textContent = video.original_filename || video.filename || 'Video Preview';
+        source.src = `/api/videos/${video.id}/stream`;
+        player.load();
+
+        // Metadaten
+        const duration = video.duration ? formatDuration(video.duration) : '-';
+        const resolution = video.width && video.height ? `${video.width}x${video.height}` : '-';
+        meta.textContent = `${duration} | ${resolution}`;
+
+        // Modal anzeigen
+        modal.classList.remove('hidden');
+
+        // Automatisch abspielen
+        player.play().catch(() => {});
+    }
+
+    /**
+     * Video Preview Modal schliessen
+     */
+    function closeVideoPreview() {
+        const modal = document.getElementById('preview-modal');
+        const player = document.getElementById('preview-player');
+
+        if (!modal || !player) return;
+
+        player.pause();
+        player.currentTime = 0;
+        modal.classList.add('hidden');
+    }
+
+    // Preview Modal Event Listeners
+    const previewModal = document.getElementById('preview-modal');
+    const previewClose = document.getElementById('preview-close');
+    const previewFullscreen = document.getElementById('preview-fullscreen');
+    const previewPlayer = document.getElementById('preview-player');
+
+    if (previewClose) {
+        previewClose.addEventListener('click', closeVideoPreview);
+    }
+
+    if (previewModal) {
+        // Schliessen bei Klick auf Hintergrund
+        previewModal.addEventListener('click', (e) => {
+            if (e.target === previewModal) {
+                closeVideoPreview();
+            }
+        });
+    }
+
+    if (previewFullscreen && previewPlayer) {
+        previewFullscreen.addEventListener('click', () => {
+            if (previewPlayer.requestFullscreen) {
+                previewPlayer.requestFullscreen();
+            } else if (previewPlayer.webkitRequestFullscreen) {
+                previewPlayer.webkitRequestFullscreen();
+            }
+        });
+    }
+
+    // ESC-Taste schliesst Modal
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeVideoPreview();
+        }
+    });
+
     // Global verfügbar machen
     window.loadVideos = loadVideos;
+    window.openVideoPreview = openVideoPreview;
+    window.closeVideoPreview = closeVideoPreview;
 });

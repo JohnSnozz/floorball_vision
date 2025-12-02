@@ -35,6 +35,12 @@ def index():
     )
 
 
+@labeling_bp.route("/datasets")
+def datasets():
+    """Dataset-Verwaltung (exportierte Labels)."""
+    return render_template("labeling/datasets.html")
+
+
 @labeling_bp.route("/project/<project_id>")
 def project_detail(project_id):
     """Projekt-Details mit Batches."""
@@ -259,6 +265,7 @@ def api_add_batch():
         # Batch in DB speichern
         batch = LabelingBatch(
             project_id=project.id,
+            video_id=video.id,
             batch_id=batch_result["batch_id"],
             num_frames=batch_result["total_extracted"],
             frames_path=batch_result["batch_dir"],
@@ -371,6 +378,7 @@ def api_add_batch_and_open():
         # Batch in DB speichern (mit View-ID)
         batch = LabelingBatch(
             project_id=project.id,
+            video_id=video.id,
             batch_id=batch_name,
             num_frames=batch_result["total_extracted"],
             frames_path=batch_result["batch_dir"],
@@ -429,7 +437,7 @@ def api_open_batch(batch_id):
 
         if view_exists and batch.view_id:
             # Bestehenden View verwenden
-            label_url = client.get_view_labeling_url(project.label_studio_id, batch.view_id)
+            label_url = client.get_view_url(project.label_studio_id, batch.view_id)
         elif batch.task_ids and len(batch.task_ids) > 0:
             # View erstellen mit gespeicherten Task-IDs
             view = client.create_filtered_view(
@@ -439,10 +447,9 @@ def api_open_batch(batch_id):
             )
             batch.view_id = view.get("id")
             db.session.commit()
-            label_url = client.get_view_labeling_url(project.label_studio_id, batch.view_id)
+            label_url = client.get_view_url(project.label_studio_id, batch.view_id)
         else:
-            # Keine Task-IDs gespeichert - versuche sie aus dem frames_path zu rekonstruieren
-            # indem wir die Bilder im Label Studio Projekt suchen
+            # Keine Task-IDs gespeichert - öffne Projekt ohne Tab-Filter
             label_url = client.get_labeling_url(project.label_studio_id)
 
             # Hinweis: Für ältere Batches ohne task_ids können wir keinen
@@ -456,6 +463,64 @@ def api_open_batch(batch_id):
         })
 
     except LabelStudioError as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@labeling_bp.route("/api/batch/<batch_id>/rename", methods=["POST"])
+def api_rename_batch(batch_id):
+    """
+    Benennt einen Batch um.
+
+    Aktualisiert auch den View-Titel in Label Studio falls vorhanden.
+
+    JSON Body:
+        new_name: Neuer Name für den Batch
+    """
+    batch = db.session.query(LabelingBatch).filter_by(batch_id=batch_id).first()
+    if not batch:
+        return jsonify({"error": "Batch nicht gefunden"}), 404
+
+    data = request.get_json() or {}
+    new_name = data.get("new_name", "").strip()
+
+    if not new_name:
+        return jsonify({"error": "Neuer Name erforderlich"}), 400
+
+    # Name bereinigen
+    new_name = "".join(c if c.isalnum() or c in "-_ " else "_" for c in new_name)
+
+    if not new_name:
+        return jsonify({"error": "Ungültiger Name"}), 400
+
+    old_name = batch.batch_id
+
+    try:
+        # Label Studio View umbenennen falls vorhanden
+        if batch.view_id and batch.project:
+            try:
+                client = LabelStudioClient()
+                # View-Titel aktualisieren via PATCH
+                client._request(
+                    "PATCH",
+                    f"/dm/views/{batch.view_id}/",
+                    json={"data": {"title": new_name}}
+                )
+            except Exception as e:
+                # View-Umbenennung fehlgeschlagen, aber lokale Umbenennung fortsetzen
+                print(f"Warning: Could not rename Label Studio view: {e}")
+
+        # Lokale Umbenennung
+        batch.batch_id = new_name
+        db.session.commit()
+
+        return jsonify({
+            "success": True,
+            "old_name": old_name,
+            "new_name": new_name
+        })
+
+    except Exception as e:
+        db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
 

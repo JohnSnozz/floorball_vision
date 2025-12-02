@@ -16,81 +16,98 @@
         </a>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <!-- Videos ohne Kalibrierung -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-xl font-semibold mb-4">Videos kalibrieren</h2>
+    <!-- Videos mit Kalibrierungen -->
+    <div class="bg-white rounded-lg shadow">
+        <div class="p-4 border-b">
+            <h2 class="text-xl font-semibold">Videos & Kalibrierungen</h2>
+        </div>
 
-            {% if videos %}
-            <div class="space-y-3">
-                {% for video in videos %}
-                <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100">
-                    <div class="flex items-center gap-3">
-                        <div class="w-16 h-10 bg-gray-300 rounded overflow-hidden">
+        {% if videos %}
+        <div class="divide-y" id="videos-list">
+            {% for video in videos %}
+            {% set video_calibrations = calibrations | selectattr('video_id', 'equalto', video.id) | list %}
+            <div class="video-item" data-video-id="{{ video.id }}">
+                <!-- Video Header (klickbar zum Ausklappen) -->
+                <div class="flex items-center justify-between p-4 hover:bg-gray-50 cursor-pointer"
+                     onclick="toggleVideo('{{ video.id }}')">
+                    <div class="flex items-center gap-4">
+                        <!-- Expand Icon -->
+                        <svg class="expand-icon w-5 h-5 text-gray-400 transition-transform duration-200 {% if video_calibrations %}{% else %}opacity-30{% endif %}"
+                             fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                        </svg>
+
+                        <!-- Thumbnail -->
+                        <div class="w-20 h-12 bg-gray-200 rounded overflow-hidden flex-shrink-0">
                             {% if video.file_path %}
                             <img src="/api/videos/{{ video.id }}/thumbnail"
                                  class="w-full h-full object-cover"
                                  onerror="this.style.display='none'">
                             {% endif %}
                         </div>
+
+                        <!-- Video Info -->
                         <div>
-                            <p class="font-medium">{{ video.filename or video.original_filename }}</p>
+                            <p class="font-medium">{{ video.original_filename or video.filename }}</p>
                             <p class="text-sm text-gray-500">
                                 {% if video.duration %}{{ "%.0f"|format(video.duration / 60) }} min{% endif %}
                                 {% if video.width and video.height %} | {{ video.width }}x{{ video.height }}{% endif %}
+                                {% if video_calibrations %}
+                                | <span class="text-green-600">{{ video_calibrations | length }} Kalibrierung{% if video_calibrations | length != 1 %}en{% endif %}</span>
+                                {% else %}
+                                | <span class="text-gray-400">Keine Kalibrierung</span>
+                                {% endif %}
                             </p>
                         </div>
                     </div>
-                    <div class="flex gap-2">
+
+                    <!-- Neue Kalibrierung Button -->
+                    <div class="flex gap-2" onclick="event.stopPropagation()">
                         <a href="{{ url_for('calibration.simple_calibration', video_id=video.id) }}"
                            class="bg-green-500 text-white px-3 py-2 rounded hover:bg-green-600 text-sm">
-                            Einfach
-                        </a>
-                        <a href="{{ url_for('calibration.setup', video_id=video.id) }}"
-                           class="bg-blue-500 text-white px-3 py-2 rounded hover:bg-blue-600 text-sm">
-                            Erweitert
+                            + Neue Kalibrierung
                         </a>
                     </div>
                 </div>
-                {% endfor %}
-            </div>
-            {% else %}
-            <div class="text-center py-8 text-gray-500">
-                <p>Keine Videos vorhanden.</p>
-                <a href="/" class="text-blue-500 hover:underline">
-                    Videos hochladen
-                </a>
-            </div>
-            {% endif %}
-        </div>
 
-        <!-- Bestehende Kalibrierungen -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-xl font-semibold mb-4">Gespeicherte Kalibrierungen</h2>
-
-            {% if calibrations %}
-            <div class="space-y-3">
-                {% for cal in calibrations %}
-                <div class="p-3 bg-gray-50 rounded-lg {% if cal.is_active %}border-2 border-green-500{% endif %}">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <p class="font-medium">{{ cal.name }}</p>
-                            <p class="text-sm text-gray-500">
-                                {{ cal.field_length }}m x {{ cal.field_width }}m |
-                                {{ cal.created_at.strftime('%d.%m.%Y') if cal.created_at else 'Datum unbekannt' }}
-                            </p>
+                <!-- Kalibrierungen (ausklappbar) -->
+                {% if video_calibrations %}
+                <div class="calibrations-panel hidden bg-gray-50 border-t">
+                    {% for cal in video_calibrations %}
+                    <div class="flex items-center justify-between px-4 py-3 pl-16 {% if not loop.last %}border-b border-gray-200{% endif %} hover:bg-gray-100">
+                        <div class="flex items-center gap-3">
+                            {% if cal.is_active %}
+                            <span class="w-2 h-2 bg-green-500 rounded-full" title="Aktiv"></span>
+                            {% else %}
+                            <span class="w-2 h-2 bg-gray-300 rounded-full"></span>
+                            {% endif %}
+                            <div>
+                                <div class="flex items-center gap-2">
+                                    <span id="cal-name-{{ cal.id }}" class="font-medium text-sm">{{ cal.name or 'Unbenannt' }}</span>
+                                    <button onclick="event.stopPropagation(); renameCalibration('{{ cal.id }}', '{{ cal.name or '' }}')"
+                                            class="text-gray-400 hover:text-blue-600" title="Umbenennen">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <p class="text-xs text-gray-500">
+                                    {{ cal.field_length or 40 }}m x {{ cal.field_width or 20 }}m |
+                                    {{ cal.created_at.strftime('%d.%m.%Y %H:%M') if cal.created_at else '-' }}
+                                    {% if cal.is_active %}<span class="text-green-600 ml-1">Aktiv</span>{% endif %}
+                                </p>
+                            </div>
                         </div>
                         <div class="flex items-center gap-2">
-                            {% if cal.is_active %}
-                            <span class="bg-green-100 text-green-800 text-xs px-2 py-1 rounded">Aktiv</span>
+                            {% if not cal.is_active %}
+                            <button onclick="activateCalibration('{{ cal.id }}')"
+                                    class="text-green-600 hover:text-green-800 text-sm">
+                                Aktivieren
+                            </button>
                             {% endif %}
-                            <a href="{{ url_for('calibration.quick_calibration', video_id=cal.video_id) }}"
-                               class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600">
+                            <a href="{{ url_for('calibration.simple_calibration', video_id=cal.video_id, calibration_id=cal.id) }}"
+                               class="text-blue-600 hover:text-blue-800 text-sm">
                                 Bearbeiten
-                            </a>
-                            <a href="{{ url_for('calibration.setup', video_id=cal.video_id) }}"
-                               class="bg-gray-500 text-white px-3 py-1 rounded text-sm hover:bg-gray-600">
-                                Setup
                             </a>
                             <button onclick="deleteCalibration('{{ cal.id }}')"
                                     class="text-red-500 hover:text-red-700 text-sm">
@@ -98,38 +115,57 @@
                             </button>
                         </div>
                     </div>
+                    {% endfor %}
                 </div>
-                {% endfor %}
+                {% endif %}
             </div>
-            {% else %}
-            <div class="text-center py-8 text-gray-500">
-                <p>Noch keine Kalibrierungen erstellt.</p>
-            </div>
-            {% endif %}
+            {% endfor %}
         </div>
+        {% else %}
+        <div class="text-center py-12 text-gray-500">
+            <p class="mb-2">Keine Videos vorhanden.</p>
+            <a href="/" class="text-blue-500 hover:underline">
+                Videos hochladen
+            </a>
+        </div>
+        {% endif %}
     </div>
 
-    <!-- Info-Box -->
-    <div class="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
-        <h3 class="font-semibold text-blue-800 mb-3">Wie funktioniert die Kalibrierung?</h3>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-blue-700">
-            <div>
-                <p class="font-medium">1. Bande einzeichnen</p>
-                <p>Zeichne das Spielfeld-Polygon um den Bereich zu definieren, in dem Spieler erkannt werden.</p>
-            </div>
-            <div>
-                <p class="font-medium">2. Referenzpunkte setzen</p>
-                <p>Markiere bekannte Punkte (Ecken, Mittellinie) im Video und auf dem Spielfeld-Template.</p>
-            </div>
-            <div>
-                <p class="font-medium">3. Verifizieren</p>
-                <p>Prüfe das Grid-Overlay um sicherzustellen, dass die Kalibrierung korrekt ist.</p>
-            </div>
-        </div>
-    </div>
 </div>
 
 <script>
+// Video ausklappen/zuklappen
+function toggleVideo(videoId) {
+    const item = document.querySelector(`[data-video-id="${videoId}"]`);
+    const panel = item.querySelector('.calibrations-panel');
+    const icon = item.querySelector('.expand-icon');
+
+    if (!panel) return; // Keine Kalibrierungen
+
+    panel.classList.toggle('hidden');
+    icon.classList.toggle('rotate-90');
+}
+
+// Kalibrierung aktivieren
+async function activateCalibration(calId) {
+    try {
+        const response = await fetch(`/calibration/api/calibrations/${calId}/activate`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            location.reload();
+        } else {
+            alert('Fehler: ' + result.error);
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+
+// Kalibrierung löschen
 async function deleteCalibration(calId) {
     if (!confirm('Kalibrierung wirklich löschen?')) return;
 
@@ -149,5 +185,45 @@ async function deleteCalibration(calId) {
         alert('Fehler: ' + err.message);
     }
 }
+
+// Kalibrierung umbenennen
+async function renameCalibration(calId, currentName) {
+    const newName = prompt('Neuer Name für die Kalibrierung:', currentName || '');
+    if (newName === null) return; // Abgebrochen
+
+    try {
+        const response = await fetch(`/calibration/api/calibrations/${calId}/rename`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: newName })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // Name direkt im DOM aktualisieren
+            const nameEl = document.getElementById(`cal-name-${calId}`);
+            if (nameEl) {
+                nameEl.textContent = newName || 'Unbenannt';
+            }
+        } else {
+            alert('Fehler: ' + result.error);
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+
+// Alle Videos mit Kalibrierungen standardmässig aufklappen
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.calibrations-panel').forEach(panel => {
+        // Aufklappen wenn aktive Kalibrierung vorhanden
+        const hasActive = panel.querySelector('.bg-green-500');
+        if (hasActive) {
+            panel.classList.remove('hidden');
+            panel.closest('.video-item').querySelector('.expand-icon').classList.add('rotate-90');
+        }
+    });
+});
 </script>
 {% endblock %}

@@ -574,3 +574,200 @@ def api_delete_run(run_id):
     db.session.commit()
 
     return jsonify({"success": True, "message": f"Training '{run.model_name}' gelöscht"})
+
+
+# === Dataset/Export API ===
+
+@training_bp.route("/api/datasets")
+def api_list_datasets():
+    """Listet alle verfügbaren Datasets (Exports) mit Details."""
+    exports_dir = Path("data/labeling/exports")
+    datasets = []
+
+    if exports_dir.exists():
+        for export_path in exports_dir.iterdir():
+            if export_path.is_dir():
+                data_yaml = export_path / "data.yaml"
+                if data_yaml.exists():
+                    # Basis-Info
+                    images_dir = export_path / "images"
+                    labels_dir = export_path / "labels"
+                    image_count = len(list(images_dir.glob("*"))) if images_dir.exists() else 0
+                    label_count = len(list(labels_dir.glob("*.txt"))) if labels_dir.exists() else 0
+
+                    # Klassen lesen
+                    classes = []
+                    classes_file = export_path / "classes.txt"
+                    if classes_file.exists():
+                        with open(classes_file) as f:
+                            classes = [line.strip() for line in f if line.strip()]
+
+                    # Grösse berechnen
+                    total_size = sum(f.stat().st_size for f in export_path.rglob("*") if f.is_file())
+                    size_mb = total_size / (1024 * 1024)
+
+                    # Hat train/val Split?
+                    has_split = (export_path / "train").exists() and (export_path / "val").exists()
+
+                    # Erstellungsdatum (aus data.yaml oder Ordner)
+                    created_at = datetime.fromtimestamp(export_path.stat().st_mtime)
+
+                    datasets.append({
+                        "name": export_path.name,
+                        "path": str(export_path),
+                        "images": image_count,
+                        "labels": label_count,
+                        "classes": classes,
+                        "size_mb": round(size_mb, 1),
+                        "has_split": has_split,
+                        "created_at": created_at.isoformat()
+                    })
+
+    # Nach Datum sortieren (neueste zuerst)
+    datasets.sort(key=lambda x: x["created_at"], reverse=True)
+
+    return jsonify(datasets)
+
+
+@training_bp.route("/api/datasets/<dataset_name>")
+def api_get_dataset(dataset_name):
+    """Holt Details zu einem Dataset."""
+    export_path = Path("data/labeling/exports") / dataset_name
+
+    if not export_path.exists():
+        return jsonify({"error": "Dataset nicht gefunden"}), 404
+
+    data_yaml = export_path / "data.yaml"
+    if not data_yaml.exists():
+        return jsonify({"error": "Ungültiges Dataset (keine data.yaml)"}), 400
+
+    # Details sammeln
+    images_dir = export_path / "images"
+    labels_dir = export_path / "labels"
+    image_count = len(list(images_dir.glob("*"))) if images_dir.exists() else 0
+    label_count = len(list(labels_dir.glob("*.txt"))) if labels_dir.exists() else 0
+
+    # Klassen
+    classes = []
+    classes_file = export_path / "classes.txt"
+    if classes_file.exists():
+        with open(classes_file) as f:
+            classes = [line.strip() for line in f if line.strip()]
+
+    # Grösse
+    total_size = sum(f.stat().st_size for f in export_path.rglob("*") if f.is_file())
+
+    # Train/Val Split Info
+    split_info = None
+    if (export_path / "train").exists():
+        train_images = len(list((export_path / "train" / "images").glob("*"))) if (export_path / "train" / "images").exists() else 0
+        val_images = len(list((export_path / "val" / "images").glob("*"))) if (export_path / "val" / "images").exists() else 0
+        split_info = {
+            "train_images": train_images,
+            "val_images": val_images
+        }
+
+    return jsonify({
+        "name": dataset_name,
+        "path": str(export_path),
+        "images": image_count,
+        "labels": label_count,
+        "classes": classes,
+        "size_bytes": total_size,
+        "size_mb": round(total_size / (1024 * 1024), 1),
+        "split": split_info,
+        "created_at": datetime.fromtimestamp(export_path.stat().st_mtime).isoformat()
+    })
+
+
+@training_bp.route("/api/datasets/<dataset_name>/rename", methods=["POST"])
+def api_rename_dataset(dataset_name):
+    """Benennt ein Dataset um."""
+    import shutil
+
+    export_path = Path("data/labeling/exports") / dataset_name
+
+    if not export_path.exists():
+        return jsonify({"error": "Dataset nicht gefunden"}), 404
+
+    data = request.get_json() or {}
+    new_name = data.get("new_name", "").strip()
+
+    if not new_name:
+        return jsonify({"error": "Neuer Name erforderlich"}), 400
+
+    # Name bereinigen
+    new_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in new_name)
+
+    if not new_name:
+        return jsonify({"error": "Ungültiger Name"}), 400
+
+    new_path = export_path.parent / new_name
+
+    if new_path.exists():
+        return jsonify({"error": f"Dataset '{new_name}' existiert bereits"}), 400
+
+    try:
+        # Ordner umbenennen
+        shutil.move(str(export_path), str(new_path))
+
+        # data.yaml aktualisieren falls path drin steht
+        data_yaml = new_path / "data.yaml"
+        if data_yaml.exists():
+            with open(data_yaml) as f:
+                content = f.read()
+            # Pfad in data.yaml aktualisieren
+            content = content.replace(str(export_path.absolute()), str(new_path.absolute()))
+            content = content.replace(dataset_name, new_name)
+            with open(data_yaml, "w") as f:
+                f.write(content)
+
+        # LabelingProject export_path aktualisieren falls verknüpft
+        projects = db.session.query(LabelingProject).filter(
+            LabelingProject.export_path.contains(dataset_name)
+        ).all()
+        for project in projects:
+            if project.export_path:
+                project.export_path = project.export_path.replace(dataset_name, new_name)
+        db.session.commit()
+
+        return jsonify({
+            "success": True,
+            "old_name": dataset_name,
+            "new_name": new_name,
+            "new_path": str(new_path)
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@training_bp.route("/api/datasets/<dataset_name>", methods=["DELETE"])
+def api_delete_dataset(dataset_name):
+    """Löscht ein Dataset."""
+    import shutil
+
+    export_path = Path("data/labeling/exports") / dataset_name
+
+    if not export_path.exists():
+        return jsonify({"error": "Dataset nicht gefunden"}), 404
+
+    try:
+        # Ordner löschen
+        shutil.rmtree(export_path)
+
+        # LabelingProject export_path clearen falls verknüpft
+        projects = db.session.query(LabelingProject).filter(
+            LabelingProject.export_path.contains(dataset_name)
+        ).all()
+        for project in projects:
+            project.export_path = None
+        db.session.commit()
+
+        return jsonify({
+            "success": True,
+            "deleted": dataset_name
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500

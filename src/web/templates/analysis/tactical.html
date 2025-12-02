@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Taktische Ansicht - {{ video.filename }}{% endblock %}
+{% block title %}Taktische Ansicht - {{ video.original_filename or video.filename }}{% endblock %}
 
 {% block head %}
 <style>

@@ -350,6 +350,10 @@ class LabelStudioClient:
 
         return self._request("POST", "/dm/views/", json=view_data)
 
+    def get_view_url(self, project_id: int, view_id: int) -> str:
+        """Gibt die URL zum Data Manager mit einem bestimmten View/Tab zurück."""
+        return f"{self.url}/projects/{project_id}/data?tab={view_id}"
+
     def get_view_labeling_url(self, project_id: int, view_id: int) -> str:
         """Gibt die URL zum Labeling mit einem bestimmten View/Tab zurück."""
         return f"{self.url}/projects/{project_id}/data?tab={view_id}&labeling=1"

@@ -15,7 +15,7 @@
         <div class="aspect-video bg-gray-200 relative">
             {% if item.video.file_path %}
             <img src="/api/videos/{{ item.video.id }}/thumbnail"
-                 alt="{{ item.video.filename }}"
+                 alt="{{ item.video.original_filename or item.video.filename }}"
                  class="w-full h-full object-cover">
             {% endif %}
             <div class="absolute top-2 right-2 bg-green-500 text-white text-xs px-2 py-1 rounded">
@@ -23,7 +23,7 @@
             </div>
         </div>
         <div class="p-4">
-            <h3 class="font-semibold text-gray-900 truncate">{{ item.video.filename }}</h3>
+            <h3 class="font-semibold text-gray-900 truncate">{{ item.video.original_filename or item.video.filename }}</h3>
             <p class="text-sm text-gray-500 mt-1">
                 {{ "%.1f"|format(item.video.duration or 0) }}s @ {{ item.video.fps|int }}fps
             </p>

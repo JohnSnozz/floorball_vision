@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Video-Analyse - {{ video.filename }}{% endblock %}
+{% block title %}Video-Analyse - {{ video.original_filename or video.filename }}{% endblock %}
 
 {% block head %}
 <style>
@@ -77,6 +77,18 @@
         border-color: #3B82F6;
         background: #EFF6FF;
     }
+    .tracker-card {
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .tracker-card:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    .tracker-card.selected {
+        border-color: #3B82F6;
+        background: #EFF6FF;
+    }
     .snippet-card {
         border-left: 4px solid;
     }
@@ -102,12 +114,34 @@
             <a href="/analysis" class="text-blue-500 hover:underline text-sm">
                 &larr; Zurück zur Übersicht
             </a>
-            <h1 class="text-2xl font-bold mt-2">Analyse: {{ video.filename }}</h1>
+            <h1 class="text-2xl font-bold mt-2">Analyse: {{ video.original_filename or video.filename }}</h1>
         </div>
     </div>
 
     <!-- Workflow Steps -->
     <div class="space-y-4">
+
+        <!-- ==================== VORBEREITUNG ==================== -->
+        <div class="border-2 border-blue-300 rounded-lg overflow-hidden" id="section-vorbereitung">
+            <div class="bg-blue-50 px-4 py-3 cursor-pointer flex items-center justify-between" onclick="toggleSection('vorbereitung')">
+                <div class="flex items-center gap-3">
+                    <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    </svg>
+                    <div>
+                        <h2 class="text-lg font-bold text-blue-800">Vorbereitung</h2>
+                        <p class="text-sm text-blue-600">Setup & Testing mit kurzen Snippets (5-30s)</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span id="section-vorbereitung-status" class="text-sm text-blue-600 font-medium"></span>
+                    <svg id="section-vorbereitung-chevron" class="w-6 h-6 text-blue-600 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </div>
+            </div>
+            <div id="section-vorbereitung-content" class="p-4 space-y-4 bg-white">
 
         <!-- Step 1: Snippets auswählen -->
         <div id="step1-panel" class="step-panel border-2 rounded-lg p-4 active">
@@ -360,6 +394,38 @@
                     </div>
                 </div>
 
+                <!-- Tracker-Auswahl -->
+                <div class="mt-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Tracking-Algorithmus</label>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3" id="trackerSelection">
+                        {% for tracker_id, tracker in trackers.items() %}
+                        <label class="tracker-card border-2 rounded-lg p-3 cursor-pointer hover:border-blue-400 transition-all {% if tracker_id == 'bytetrack' %}border-blue-500 bg-blue-50{% else %}border-gray-200{% endif %}">
+                            <input type="radio" name="tracker" value="{{ tracker_id }}" class="hidden" {% if tracker_id == 'bytetrack' %}checked{% endif %}>
+                            <div class="flex items-start justify-between">
+                                <div>
+                                    <h4 class="font-medium text-gray-900">{{ tracker.name }}</h4>
+                                    <p class="text-xs text-gray-500 mt-1">{{ tracker.description }}</p>
+                                </div>
+                                <div class="flex flex-col items-end text-xs">
+                                    <span class="{% if tracker.speed == 'Schnell' %}text-green-600{% elif tracker.speed == 'Mittel' %}text-yellow-600{% else %}text-red-600{% endif %}">
+                                        {{ tracker.speed }}
+                                    </span>
+                                    <span class="text-gray-400">GPU: {{ tracker.gpu_usage }}</span>
+                                </div>
+                            </div>
+                            <div class="mt-2 flex flex-wrap gap-1">
+                                {% for feature in tracker.features[:2] %}
+                                <span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{{ feature }}</span>
+                                {% endfor %}
+                            </div>
+                        </label>
+                        {% endfor %}
+                    </div>
+                    <p class="text-xs text-gray-500 mt-2">
+                        <strong>Hinweis:</strong> Der Tracker wird nicht trainiert - nur der YOLO-Detektor nutzt deine Daten.
+                    </p>
+                </div>
+
                 <!-- Erweiterte Parameter -->
                 <div class="mt-4 border-t pt-4">
                     <button type="button" id="toggleAdvancedParams" class="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1">
@@ -433,6 +499,10 @@
                             <div class="flex items-center justify-between mb-2">
                                 <span class="font-medium">Modell:</span>
                                 <span id="selectedModelDisplay" class="font-mono text-blue-600 text-sm">-</span>
+                            </div>
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="font-medium">Tracker:</span>
+                                <span id="selectedTrackerDisplay" class="font-mono text-purple-600 text-sm">ByteTrack</span>
                             </div>
                             <div class="flex items-center justify-between mb-2">
                                 <span class="font-medium">Confidence:</span>
@@ -513,11 +583,11 @@
             </div>
         </div>
 
-        <!-- Step 7: Positioning / Taktische Ansicht -->
+        <!-- Step 7: Positioning Review / Taktische Ansicht -->
         <div id="step7-panel" class="step-panel border-2 rounded-lg p-4 collapsed">
             <div class="flex items-center gap-3 cursor-pointer" onclick="toggleStep(7)">
                 <div id="step7-indicator" class="step-indicator pending">7</div>
-                <h2 class="text-lg font-semibold flex-1">Positioning</h2>
+                <h2 class="text-lg font-semibold flex-1">Positioning Review</h2>
                 <span id="step7-status" class="text-sm text-gray-500"></span>
                 <svg class="w-5 h-5 text-gray-400 step-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
@@ -567,12 +637,382 @@
                     <button onclick="goToStep(6)" class="text-gray-600 hover:text-gray-800 px-4 py-2">
                         &larr; Zurück
                     </button>
+                    <span class="text-green-600 font-medium flex items-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                        </svg>
+                        Vorbereitung abgeschlossen
+                    </span>
+                </div>
+            </div>
+        </div>
+
+            </div><!-- Ende section-vorbereitung-content -->
+        </div><!-- Ende Vorbereitung -->
+
+        <!-- ==================== GANZES SPIEL ANALYSIEREN ==================== -->
+        <div class="border-2 border-green-300 rounded-lg overflow-hidden" id="section-ganzesspiel">
+            <div class="bg-green-50 px-4 py-3 cursor-pointer flex items-center justify-between" onclick="toggleSection('ganzesspiel')">
+                <div class="flex items-center gap-3">
+                    <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <div>
+                        <h2 class="text-lg font-bold text-green-800">Ganzes Spiel analysieren</h2>
+                        <p class="text-sm text-green-600">Vollständige Spielanalyse in 1-Min-Chunks</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span id="section-ganzesspiel-status" class="text-sm text-green-600 font-medium"></span>
+                    <svg id="section-ganzesspiel-chevron" class="w-6 h-6 text-green-600 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </div>
+            </div>
+            <div id="section-ganzesspiel-content" class="p-4 space-y-4 bg-white">
+
+        <!-- Step 8: Definition Spielzeit -->
+        <div id="step8-panel" class="step-panel border-2 rounded-lg p-4 collapsed">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="toggleStep(8)">
+                <div id="step8-indicator" class="step-indicator pending">8</div>
+                <h2 class="text-lg font-semibold flex-1">Definition Spielzeit</h2>
+                <span id="step8-status" class="text-sm text-gray-500"></span>
+                <svg class="w-5 h-5 text-gray-400 step-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+            </div>
+
+            <div id="step8-content" class="mt-4">
+                <p class="text-gray-600 mb-4">
+                    Definiere die effektive Spielzeit (ohne Pausen). Setze In/Out-Punkte für jedes Drittel oder jeden Abschnitt.
+                    Tastenkürzel: [I] = In-Punkt, [O] = Out-Punkt, [Space] = Play/Pause
+                </p>
+
+                <!-- Video Player für Spielzeit-Definition -->
+                <div class="bg-black rounded-lg overflow-hidden mb-4">
+                    <div class="video-container">
+                        <video id="gameTimePlayer"
+                               class="w-full"
+                               src="/api/videos/{{ video.id }}/stream"
+                               preload="metadata"
+                               style="max-height: 40vh;">
+                        </video>
+                    </div>
+
+                    <!-- Controls -->
+                    <div class="bg-gray-800 p-4">
+                        <!-- Timeline mit Spielzeit-Markern -->
+                        <div class="timeline-container mb-4" id="gameTimeline">
+                            <div class="current-time-marker" id="gameTimeMarker"></div>
+                        </div>
+
+                        <!-- Buttons -->
+                        <div class="flex items-center gap-4 flex-wrap">
+                            <button id="gamePlayPauseBtn" class="bg-white text-gray-900 px-4 py-2 rounded-lg font-medium">
+                                Play
+                            </button>
+                            <span id="gameCurrentTime" class="text-white font-mono">00:00.0</span>
+                            <span class="text-gray-400">/</span>
+                            <span id="gameDuration" class="text-white font-mono">00:00.0</span>
+
+                            <div class="flex-1"></div>
+
+                            <button id="gameSetInBtn" class="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm">
+                                In [I]
+                            </button>
+                            <button id="gameSetOutBtn" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg text-sm">
+                                Out [O]
+                            </button>
+                            <span class="text-gray-400 text-sm">
+                                <span id="gameInPointDisplay" class="text-green-400 font-mono">--:--</span> -
+                                <span id="gameOutPointDisplay" class="text-red-400 font-mono">--:--</span>
+                                (<span id="gamePeriodDuration" class="text-white">--</span>)
+                            </span>
+                            <button id="addGamePeriodBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg" disabled>
+                                + Spielzeit
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Spielzeit-Liste -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3" id="gamePeriodList">
+                    <!-- Spielzeiten werden hier eingefügt -->
+                </div>
+                <div id="noGamePeriods" class="text-center text-gray-500 py-4 border-2 border-dashed rounded-lg">
+                    Noch keine Spielzeiten definiert. Setze In- und Out-Punkte im Video.
+                </div>
+
+                <!-- Zusammenfassung -->
+                <div class="mt-4 p-4 bg-gray-100 rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <span class="text-gray-600">Definierte Spielzeiten:</span>
+                            <span id="totalGamePeriods" class="font-bold ml-2">0</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-600">Gesamte Spielzeit:</span>
+                            <span id="totalGameDuration" class="font-bold text-green-600 ml-2">00:00</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-600">Chunks (à 1 Min):</span>
+                            <span id="totalChunks" class="font-bold text-blue-600 ml-2">0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <p class="text-sm text-yellow-800">
+                        <strong>Hinweis:</strong> Die Analyse erfolgt in 1-Minuten-Chunks. Bei Abbruch wird automatisch
+                        beim letzten unvollständigen Chunk fortgesetzt.
+                    </p>
+                </div>
+
+                <div class="mt-4 flex justify-between">
+                    <button onclick="goToStep(7)" class="text-gray-600 hover:text-gray-800 px-4 py-2">
+                        &larr; Zurück zu Vorbereitung
+                    </button>
+                    <button id="step8NextBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg disabled:opacity-50" disabled>
+                        Weiter zu Schritt 9 &rarr;
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 9: Ausführung Spielanalyse -->
+        <div id="step9-panel" class="step-panel border-2 rounded-lg p-4 collapsed">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="toggleStep(9)">
+                <div id="step9-indicator" class="step-indicator pending">9</div>
+                <h2 class="text-lg font-semibold flex-1">Tracking ausführen</h2>
+                <span id="step9-status" class="text-sm text-gray-500"></span>
+                <svg class="w-5 h-5 text-gray-400 step-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+            </div>
+
+            <div id="step9-content" class="mt-4">
+                <p class="text-gray-600 mb-4">
+                    Das Tracking wird in 1-Minuten-Chunks ausgeführt. Bei Unterbrechung kann jederzeit fortgesetzt werden.
+                </p>
+
+                <!-- Analyse-Zusammenfassung -->
+                <div class="bg-gray-100 rounded-lg p-4 mb-4">
+                    <h3 class="font-semibold mb-3">Analyse-Konfiguration</h3>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div>
+                            <span class="text-gray-600">Spielzeiten:</span>
+                            <span id="analysisPeriodCount" class="font-mono ml-2">0</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-600">Gesamtdauer:</span>
+                            <span id="analysisTotalDuration" class="font-mono ml-2">--:--</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-600">Chunks:</span>
+                            <span id="analysisChunkCount" class="font-mono ml-2 text-blue-600">0</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-600">Modell:</span>
+                            <span id="analysisModelName" class="font-mono ml-2 text-blue-600">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chunk-Liste mit Fortschritt -->
+                <div id="chunkProgressContainer" class="space-y-2 max-h-64 overflow-y-auto">
+                    <!-- Chunks werden hier eingefügt -->
+                </div>
+
+                <!-- Gesamt-Fortschritt -->
+                <div class="mt-4 bg-white border rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="font-medium">Gesamt-Fortschritt</span>
+                        <span class="text-sm text-gray-500">
+                            <span id="completedChunks">0</span> / <span id="totalChunksDisplay">0</span> Chunks
+                        </span>
+                        <span id="fullAnalysisPercent" class="font-mono font-bold">0%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-bar-fill" id="fullAnalysisProgressFill" style="width: 0%"></div>
+                    </div>
+                    <p id="fullAnalysisDetail" class="text-sm text-gray-500 mt-2"></p>
+                </div>
+
+                <!-- Performance-Statistiken -->
+                <div id="performanceStats" class="mt-4 bg-gray-50 border rounded-lg p-4 hidden">
+                    <h4 class="font-medium mb-3 flex items-center gap-2">
+                        <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                        </svg>
+                        Performance
+                    </h4>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div>
+                            <span class="text-gray-600">Verarbeitungszeit:</span>
+                            <span id="statProcessingTime" class="font-mono ml-1">-</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-600">Video-Zeit:</span>
+                            <span id="statVideoTime" class="font-mono ml-1">-</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-600">Realtime-Faktor:</span>
+                            <span id="statRealtimeFactor" class="font-mono ml-1 font-bold">-</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-600">Sek/Video-Sek:</span>
+                            <span id="statSecondsPerSecond" class="font-mono ml-1">-</span>
+                        </div>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-2">
+                        Realtime-Faktor &gt; 1 = schneller als Echtzeit, &lt; 1 = langsamer
+                    </p>
+                </div>
+
+                <div class="mt-4 flex justify-between items-center">
+                    <button onclick="goToStep(8)" class="text-gray-600 hover:text-gray-800 px-4 py-2">
+                        &larr; Zurück
+                    </button>
+                    <div class="flex gap-2">
+                        <button id="pauseAnalysisBtn" class="hidden bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg">
+                            Pausieren
+                        </button>
+                        <button id="startFullAnalysisBtn" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg flex items-center gap-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+                            </svg>
+                            Tracking starten
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 10: Resultat -->
+        <div id="step10-panel" class="step-panel border-2 rounded-lg p-4 collapsed">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="toggleStep(10)">
+                <div id="step10-indicator" class="step-indicator pending">10</div>
+                <h2 class="text-lg font-semibold flex-1">Resultat</h2>
+                <span id="step10-status" class="text-sm text-gray-500"></span>
+                <svg class="w-5 h-5 text-gray-400 step-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+            </div>
+
+            <div id="step10-content" class="mt-4">
+                <p class="text-gray-600 mb-4">
+                    Die Spielanalyse ist abgeschlossen. Öffne die taktische Ansicht oder exportiere die Daten.
+                </p>
+
+                <!-- Statistiken -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                    <div class="bg-white border rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold text-blue-600" id="statFrames">-</div>
+                        <div class="text-sm text-gray-600">Frames</div>
+                    </div>
+                    <div class="bg-white border rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold text-green-600" id="statPlayers">-</div>
+                        <div class="text-sm text-gray-600">Detektionen</div>
+                    </div>
+                    <div class="bg-white border rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold text-purple-600" id="statTracks">-</div>
+                        <div class="text-sm text-gray-600">Track-IDs</div>
+                    </div>
+                    <div class="bg-white border rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold text-orange-600" id="statDuration">-</div>
+                        <div class="text-sm text-gray-600">Spielzeit</div>
+                    </div>
+                </div>
+
+                <!-- Kalibrierungs-Auswahl für taktische Ansicht -->
+                <div class="mb-6 p-4 bg-gray-50 rounded-lg border">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Kalibrierung für taktische Ansicht:</label>
+                    <select id="resultCalibrationSelect" class="w-full md:w-1/2 border rounded px-3 py-2" onchange="onResultCalibrationChange()">
+                        {% if all_calibrations %}
+                            {% for cal in all_calibrations %}
+                            <option value="{{ cal.id }}" {% if cal.is_active %}selected{% endif %}>
+                                {{ cal.name if cal.name else 'Kalibrierung ' ~ (cal.id | string)[:8] }}
+                                {% if cal.is_active %} (aktiv){% endif %}
+                            </option>
+                            {% endfor %}
+                        {% else %}
+                            <option value="">Keine Kalibrierung verfügbar</option>
+                        {% endif %}
+                    </select>
+                </div>
+
+                <!-- Taktische Ansicht (wie Step 7, aber fürs ganze Spiel) -->
+                <div class="bg-green-50 border border-green-200 rounded-lg p-6 mb-6">
+                    <div class="flex items-start gap-4">
+                        <div class="bg-green-100 rounded-full p-3">
+                            <svg class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
+                            </svg>
+                        </div>
+                        <div class="flex-1">
+                            <h3 class="font-semibold text-green-800 text-lg mb-2">Taktische Ansicht - Ganzes Spiel</h3>
+                            <p class="text-sm text-green-700 mb-4">
+                                Synchronisiertes Video mit 2D-Spielfeld-Projektion für das gesamte Spiel.
+                                Team-Farben, Bewegungs-Trails und Playback-Steuerung.
+                            </p>
+                            <a id="fullTacticalLink" href="/analysis/video/{{ video.id }}/tactical-full"
+                               class="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-medium">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+                                </svg>
+                                Taktische Ansicht öffnen
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Export-Optionen -->
+                <div class="bg-white border rounded-lg p-4">
+                    <h3 class="font-semibold mb-3 flex items-center gap-2">
+                        <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                        </svg>
+                        Daten exportieren
+                    </h3>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <button id="exportCsvBtn" class="flex items-center gap-3 px-4 py-3 bg-gray-50 hover:bg-gray-100 rounded-lg border">
+                            <span class="text-2xl">📄</span>
+                            <div class="text-left">
+                                <div class="font-medium">CSV Export</div>
+                                <div class="text-xs text-gray-500">Positionen & Timestamps</div>
+                            </div>
+                        </button>
+                        <button id="exportJsonBtn" class="flex items-center gap-3 px-4 py-3 bg-gray-50 hover:bg-gray-100 rounded-lg border">
+                            <span class="text-2xl">📋</span>
+                            <div class="text-left">
+                                <div class="font-medium">JSON Export</div>
+                                <div class="text-xs text-gray-500">Vollständige Daten</div>
+                            </div>
+                        </button>
+                        <button id="exportVideoBtn" class="flex items-center gap-3 px-4 py-3 bg-gray-50 hover:bg-gray-100 rounded-lg border">
+                            <span class="text-2xl">🎬</span>
+                            <div class="text-left">
+                                <div class="font-medium">Video Export</div>
+                                <div class="text-xs text-gray-500">Mit Overlays</div>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="mt-6 flex justify-between">
+                    <button onclick="goToStep(9)" class="text-gray-600 hover:text-gray-800 px-4 py-2">
+                        &larr; Zurück
+                    </button>
                     <a href="/analysis" class="bg-gray-800 hover:bg-gray-900 text-white px-6 py-2 rounded-lg">
-                        Fertig
+                        Zur Übersicht
                     </a>
                 </div>
             </div>
         </div>
+
+            </div><!-- Ende section-ganzesspiel-content -->
+        </div><!-- Ende Ganzes Spiel analysieren -->
 
     </div>
 </div>
@@ -580,6 +1020,84 @@
 
 {% block scripts %}
 <script>
+// ========================================
+// KOLLABIERBARE SEKTIONEN
+// ========================================
+
+let sectionStates = {
+    vorbereitung: true,  // offen
+    ganzesspiel: false   // geschlossen
+};
+
+function toggleSection(sectionName) {
+    sectionStates[sectionName] = !sectionStates[sectionName];
+    updateSectionDisplay(sectionName);
+}
+
+function updateSectionDisplay(sectionName) {
+    const content = document.getElementById(`section-${sectionName}-content`);
+    const chevron = document.getElementById(`section-${sectionName}-chevron`);
+
+    if (!content || !chevron) return;
+
+    if (sectionStates[sectionName]) {
+        content.style.display = 'block';
+        chevron.classList.remove('rotate-180');
+    } else {
+        content.style.display = 'none';
+        chevron.classList.add('rotate-180');
+    }
+}
+
+function updateSectionStatus() {
+    // Vorbereitung Status
+    const vorbereitungStatus = document.getElementById('section-vorbereitung-status');
+    if (vorbereitungStatus) {
+        if (snippets.every(s => s.tracked)) {
+            vorbereitungStatus.innerHTML = '<span class="text-green-600">Abgeschlossen</span>';
+        } else if (snippets.length > 0) {
+            vorbereitungStatus.textContent = `${snippets.length} Snippets`;
+        }
+    }
+
+    // Ganzes Spiel Status
+    const ganzesSpielStatus = document.getElementById('section-ganzesspiel-status');
+    if (ganzesSpielStatus && trackingChunks) {
+        const completed = trackingChunks.filter(c => c.status === 'completed').length;
+        if (completed > 0) {
+            if (completed === trackingChunks.length) {
+                ganzesSpielStatus.innerHTML = '<span class="text-green-600">Abgeschlossen</span>';
+            } else {
+                ganzesSpielStatus.textContent = `${completed}/${trackingChunks.length} Chunks`;
+            }
+        }
+    }
+}
+
+// Initial Sektionen-State setzen
+document.addEventListener('DOMContentLoaded', async () => {
+    updateSectionDisplay('vorbereitung');
+    updateSectionDisplay('ganzesspiel');
+
+    // Gespeichertes Modell aus localStorage laden
+    const savedModel = localStorage.getItem('floorball_selectedModel');
+    if (savedModel) {
+        selectedModel = savedModel;
+        console.log('Modell beim Laden wiederhergestellt:', selectedModel);
+    }
+
+    // Gespeicherten Tracker aus localStorage laden
+    const savedTracker = localStorage.getItem('floorball_selectedTracker');
+    if (savedTracker && trackerConfigs[savedTracker]) {
+        selectedTracker = savedTracker;
+        selectedTrackerConfig = trackerConfigs[savedTracker];
+        console.log('Tracker beim Laden wiederhergestellt:', selectedTracker);
+    } else {
+        // Default: bytetrack
+        selectedTrackerConfig = trackerConfigs['bytetrack'];
+    }
+});
+
 const videoId = "{{ video.id }}";
 const videoDuration = {{ video.duration or 0 }};
 
@@ -588,7 +1106,16 @@ let inPoint = null;
 let outPoint = null;
 let currentStep = 1;
 let selectedModel = null;
+let selectedTracker = 'bytetrack';  // Default Tracker
+let selectedTrackerConfig = null;   // Pfad zur Tracker-Config YAML
 let confThreshold = 0.3;
+
+// Tracker-Config Mapping (früh definieren für DOMContentLoaded)
+const trackerConfigs = {
+    'bytetrack': 'configs/trackers/bytetrack.yaml',
+    'botsort': 'configs/trackers/botsort.yaml',
+    'botsort_reid': 'configs/trackers/botsort_reid.yaml'
+};
 let trackingFps = 2;
 let teamAssignInterval = 10;  // Sekunden
 let jerseyOcrInterval = 5;    // Sekunden
@@ -597,6 +1124,60 @@ let enableJerseyOcr = false;
 
 // Verfügbare Modelle (wird vom Server geladen)
 let availableModels = [];
+
+// Funktion um sicherzustellen, dass ein Modell geladen ist
+async function ensureModelLoaded() {
+    // Falls bereits ein Modell gesetzt ist, nichts tun
+    if (selectedModel) return true;
+
+    // Versuche aus localStorage zu laden
+    const savedModel = localStorage.getItem('floorball_selectedModel');
+    if (savedModel) {
+        selectedModel = savedModel;
+        console.log('Modell aus localStorage geladen:', selectedModel);
+        return true;
+    }
+
+    // Versuche aktives Modell aus der Datenbank zu laden
+    try {
+        const response = await fetch('/training/api/active-model');
+        const data = await response.json();
+        if (data.model_path) {
+            selectedModel = data.model_path;
+            localStorage.setItem('floorball_selectedModel', selectedModel);
+            console.log('Aktives Modell aus DB geladen:', selectedModel);
+            return true;
+        }
+    } catch (e) {
+        console.log('Kein aktives Modell gefunden:', e);
+    }
+
+    // Versuche verfügbare Modelle zu laden und das erste zu nehmen
+    try {
+        const response = await fetch('/analysis/api/models');
+        const data = await response.json();
+        if (data.models && data.models.length > 0) {
+            // Bevorzuge trainierte Modelle
+            const trained = data.models.find(m => m.type === 'trained');
+            const model = trained || data.models[0];
+            selectedModel = model.id;
+            localStorage.setItem('floorball_selectedModel', selectedModel);
+            console.log('Erstes verfügbares Modell geladen:', selectedModel);
+            return true;
+        }
+    } catch (e) {
+        console.log('Keine Modelle verfügbar:', e);
+    }
+
+    return false;
+}
+
+// Tracker-Namen für Anzeige
+const trackerNames = {
+    'bytetrack': 'ByteTrack',
+    'botsort': 'BoT-SORT',
+    'botsort_reid': 'BoT-SORT + Re-ID'
+};
 
 const video = document.getElementById('videoPlayer');
 const timeline = document.getElementById('timeline');
@@ -627,21 +1208,31 @@ function toggleStep(step) {
 }
 
 function goToStep(step) {
-    // Nur erlauben wenn Voraussetzungen erfüllt
-    if (step > 1 && snippets.length === 0) return;
-    if (step > 2 && !snippets.every(s => s.extracted)) return;
+    // Nur erlauben wenn Voraussetzungen erfüllt (für Vorbereitung 1-7)
+    if (step > 1 && step <= 7 && snippets.length === 0) return;
+    if (step > 2 && step <= 7 && !snippets.every(s => s.extracted)) return;
     // Step 3 = Teams -> keine Voraussetzung außer extracted
     // Step 4/5 kann übersprungen werden wenn bereits getrackt
-    if (step > 4 && !selectedModel && !snippets.every(s => s.tracked)) return;
-    // Step 6 (Review) und Step 7 (Positioning) - erlaubt wenn alle getrackt
-    // (kein Block hier - wird unten geprüft)
+    if (step > 4 && step <= 7 && !selectedModel && !snippets.every(s => s.tracked)) return;
+    // Step 8+ (Ganzes Spiel) - erlaubt wenn Vorbereitung (Step 7) erreicht wurde oder übersprungen wird
 
     currentStep = step;
 
-    // Alle Panels aktualisieren (7 steps now)
-    for (let i = 1; i <= 7; i++) {
+    // Automatisch richtige Sektion öffnen
+    if (step >= 1 && step <= 7) {
+        sectionStates.vorbereitung = true;
+        updateSectionDisplay('vorbereitung');
+    } else if (step >= 8) {
+        sectionStates.ganzesspiel = true;
+        updateSectionDisplay('ganzesspiel');
+    }
+
+    // Alle Panels aktualisieren (10 steps now)
+    for (let i = 1; i <= 10; i++) {
         const panel = document.getElementById(`step${i}-panel`);
         const indicator = document.getElementById(`step${i}-indicator`);
+
+        if (!panel || !indicator) continue;
 
         panel.classList.remove('active', 'collapsed', 'completed');
         indicator.classList.remove('active', 'pending', 'completed');
@@ -668,6 +1259,9 @@ function goToStep(step) {
     if (step === 5) renderTrackingList();
     if (step === 6) renderReviewList();
     if (step === 7) renderTacticalList();
+    if (step === 8) initGameTimePlayer();
+    if (step === 9) renderChunkProgress();
+    if (step === 10) loadResultStats();
 }
 
 function updateStepStatus() {
@@ -945,8 +1539,8 @@ async function loadModels() {
 
 function renderModelList() {
     const list = document.getElementById('modelList');
-    list.innerHTML = availableModels.map(model => `
-        <div class="model-card border-2 rounded-lg p-4 ${selectedModel === model.id ? 'selected' : ''}" onclick="selectModel('${model.id}')">
+    list.innerHTML = availableModels.map((model, idx) => `
+        <div class="model-card border-2 rounded-lg p-4 ${selectedModel === model.id ? 'selected' : ''}" data-model-idx="${idx}">
             <div class="flex items-center gap-2 mb-2">
                 ${model.type === 'trained' ?
                     '<span class="bg-green-100 text-green-800 text-xs px-2 py-1 rounded">Trainiert</span>' :
@@ -958,12 +1552,26 @@ function renderModelList() {
             ${model.map50 ? `<p class="text-xs text-gray-500 mt-2">mAP@50: ${(model.map50 * 100).toFixed(1)}%</p>` : ''}
         </div>
     `).join('');
+
+    // Add click handlers after rendering
+    list.querySelectorAll('.model-card').forEach(card => {
+        card.addEventListener('click', () => {
+            const idx = parseInt(card.dataset.modelIdx);
+            if (availableModels[idx]) {
+                selectModel(availableModels[idx].id);
+            }
+        });
+    });
 }
 
 function selectModel(modelId) {
+    console.log('selectModel called with:', modelId);
     selectedModel = modelId;
+    // In localStorage speichern für Persistenz über Seitenladungen
+    localStorage.setItem('floorball_selectedModel', modelId);
     renderModelList();
     document.getElementById('step4NextBtn').disabled = false;
+    console.log('step4NextBtn disabled:', document.getElementById('step4NextBtn').disabled);
     updateStepStatus();
 }
 
@@ -974,6 +1582,7 @@ let forceRetrack = false;
 function renderTrackingList() {
     const modelName = selectedModel ? selectedModel.split('/').pop() : '-';
     document.getElementById('selectedModelDisplay').textContent = modelName;
+    document.getElementById('selectedTrackerDisplay').textContent = trackerNames[selectedTracker] || selectedTracker;
     document.getElementById('selectedConfDisplay').textContent = confThreshold.toFixed(2);
     document.getElementById('selectedFpsDisplay').textContent = `${trackingFps} fps`;
 
@@ -1078,6 +1687,7 @@ async function trackAll() {
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     model_path: selectedModel,
+                    tracker: selectedTracker,
                     conf_threshold: confThreshold,
                     target_fps: trackingFps,
                     team_config: tc,
@@ -1237,6 +1847,45 @@ document.getElementById('trackingFps').addEventListener('change', (e) => {
     if (trackingFps < 1) trackingFps = 1;
     if (trackingFps > 30) trackingFps = 30;
     e.target.value = trackingFps;
+});
+
+// Tracker selection - handle both click and change events
+function updateTrackerSelection() {
+    document.querySelectorAll('.tracker-card').forEach(card => {
+        const cardRadio = card.querySelector('input[name="tracker"]');
+        if (cardRadio && cardRadio.checked) {
+            selectedTracker = cardRadio.value;
+            // Tracker-Config Pfad setzen
+            selectedTrackerConfig = trackerConfigs[selectedTracker] || null;
+            // In localStorage speichern
+            localStorage.setItem('floorball_selectedTracker', selectedTracker);
+            card.classList.add('selected', 'border-blue-500', 'bg-blue-50');
+            card.classList.remove('border-gray-200');
+        } else {
+            card.classList.remove('selected', 'border-blue-500', 'bg-blue-50');
+            card.classList.add('border-gray-200');
+        }
+    });
+    // Ensure model selection is preserved - don't change button state
+    console.log('Tracker updated to:', selectedTracker, 'Config:', selectedTrackerConfig, '| Model still:', selectedModel);
+}
+
+// Listen for clicks on tracker cards
+document.querySelectorAll('.tracker-card').forEach(card => {
+    card.addEventListener('click', (e) => {
+        e.stopPropagation();  // Prevent event bubbling
+        const radio = card.querySelector('input[name="tracker"]');
+        if (radio) {
+            radio.checked = true;
+            updateTrackerSelection();
+            console.log('Tracker selected:', radio.value);
+        }
+    });
+});
+
+// Also listen for change events (keyboard navigation)
+document.querySelectorAll('input[name="tracker"]').forEach(radio => {
+    radio.addEventListener('change', updateTrackerSelection);
 });
 
 // Advanced params toggle
@@ -1609,9 +2258,571 @@ async function loadBoundaryPolygon() {
     }
 }
 
+// ========================================
+// STEP 8: SPIELZEIT-DEFINITION
+// ========================================
+
+let gamePeriods = [];  // Array von {start, end, id}
+let gameInPoint = null;
+let gameOutPoint = null;
+let gameTimePlayerInitialized = false;
+
+// Spielzeit-Farben (ähnlich wie Snippets)
+const periodColors = ['#10B981', '#3B82F6', '#F59E0B', '#8B5CF6', '#EF4444', '#EC4899'];
+
+function initGameTimePlayer() {
+    if (gameTimePlayerInitialized) {
+        renderGamePeriodList();
+        return;
+    }
+
+    const gameVideo = document.getElementById('gameTimePlayer');
+    const gameTimeline = document.getElementById('gameTimeline');
+    const gameTimeMarker = document.getElementById('gameTimeMarker');
+    const gamePlayPauseBtn = document.getElementById('gamePlayPauseBtn');
+    const gameCurrentTimeEl = document.getElementById('gameCurrentTime');
+    const gameDurationEl = document.getElementById('gameDuration');
+
+    if (!gameVideo) return;
+
+    gameVideo.addEventListener('timeupdate', () => {
+        const current = gameVideo.currentTime;
+        const duration = gameVideo.duration || videoDuration;
+        gameCurrentTimeEl.textContent = formatTime(current);
+        gameDurationEl.textContent = formatTime(duration);
+        const percent = (current / duration) * 100;
+        gameTimeMarker.style.left = `${percent}%`;
+    });
+
+    gameVideo.addEventListener('loadedmetadata', () => {
+        gameDurationEl.textContent = formatTime(gameVideo.duration);
+        renderGamePeriodMarkers();
+    });
+
+    gamePlayPauseBtn.addEventListener('click', () => {
+        if (gameVideo.paused) {
+            gameVideo.play();
+            gamePlayPauseBtn.textContent = 'Pause';
+        } else {
+            gameVideo.pause();
+            gamePlayPauseBtn.textContent = 'Play';
+        }
+    });
+
+    gameTimeline.addEventListener('click', (e) => {
+        const rect = gameTimeline.getBoundingClientRect();
+        const percent = (e.clientX - rect.left) / rect.width;
+        gameVideo.currentTime = percent * (gameVideo.duration || videoDuration);
+    });
+
+    document.getElementById('gameSetInBtn').addEventListener('click', () => {
+        gameInPoint = gameVideo.currentTime;
+        if (gameOutPoint !== null && gameOutPoint <= gameInPoint) gameOutPoint = null;
+        updateGameInOutDisplay();
+    });
+
+    document.getElementById('gameSetOutBtn').addEventListener('click', () => {
+        gameOutPoint = gameVideo.currentTime;
+        if (gameInPoint !== null && gameInPoint >= gameOutPoint) gameInPoint = null;
+        updateGameInOutDisplay();
+    });
+
+    document.getElementById('addGamePeriodBtn').addEventListener('click', addGamePeriod);
+
+    // Keyboard shortcuts für Step 8
+    document.addEventListener('keydown', (e) => {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        if (currentStep !== 8) return;
+
+        if (e.key === ' ' || e.key === 'k') {
+            e.preventDefault();
+            gamePlayPauseBtn.click();
+        } else if (e.key === 'i' || e.key === 'I') {
+            e.preventDefault();
+            document.getElementById('gameSetInBtn').click();
+        } else if (e.key === 'o' || e.key === 'O') {
+            e.preventDefault();
+            document.getElementById('gameSetOutBtn').click();
+        } else if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            gameVideo.currentTime = Math.max(0, gameVideo.currentTime - 5);
+        } else if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            gameVideo.currentTime = Math.min(gameVideo.duration, gameVideo.currentTime + 5);
+        }
+    });
+
+    gameTimePlayerInitialized = true;
+    loadGamePeriods();
+}
+
+function updateGameInOutDisplay() {
+    document.getElementById('gameInPointDisplay').textContent = gameInPoint !== null ? formatTime(gameInPoint) : '--:--';
+    document.getElementById('gameOutPointDisplay').textContent = gameOutPoint !== null ? formatTime(gameOutPoint) : '--:--';
+
+    const addBtn = document.getElementById('addGamePeriodBtn');
+    if (gameInPoint !== null && gameOutPoint !== null) {
+        const duration = gameOutPoint - gameInPoint;
+        document.getElementById('gamePeriodDuration').textContent = formatTimeMins(duration);
+        addBtn.disabled = duration < 10;  // Mindestens 10 Sekunden
+    } else {
+        document.getElementById('gamePeriodDuration').textContent = '--';
+        addBtn.disabled = true;
+    }
+}
+
+function formatTimeMins(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+function addGamePeriod() {
+    if (gameInPoint === null || gameOutPoint === null) return;
+
+    gamePeriods.push({
+        start: gameInPoint,
+        end: gameOutPoint,
+        id: Date.now()
+    });
+
+    // Sortieren nach Startzeit
+    gamePeriods.sort((a, b) => a.start - b.start);
+
+    gameInPoint = null;
+    gameOutPoint = null;
+    updateGameInOutDisplay();
+    renderGamePeriodList();
+    saveGamePeriods();
+}
+
+function removeGamePeriod(id) {
+    gamePeriods = gamePeriods.filter(p => p.id !== id);
+    renderGamePeriodList();
+    saveGamePeriods();
+}
+
+function renderGamePeriodList() {
+    const list = document.getElementById('gamePeriodList');
+    const noPeriodsEl = document.getElementById('noGamePeriods');
+
+    if (gamePeriods.length === 0) {
+        list.innerHTML = '';
+        noPeriodsEl.style.display = 'block';
+    } else {
+        noPeriodsEl.style.display = 'none';
+        list.innerHTML = gamePeriods.map((period, index) => `
+            <div class="snippet-card bg-white rounded-lg p-3 shadow" style="border-color: ${periodColors[index % periodColors.length]}">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="font-medium">Spielzeit ${index + 1}</span>
+                    <button onclick="removeGamePeriod(${period.id})" class="text-red-500 hover:text-red-700 text-lg">&times;</button>
+                </div>
+                <p class="text-sm text-gray-600">
+                    ${formatTime(period.start)} - ${formatTime(period.end)}
+                </p>
+                <p class="text-xs text-gray-500">
+                    ${formatTimeMins(period.end - period.start)}
+                </p>
+            </div>
+        `).join('');
+    }
+
+    renderGamePeriodMarkers();
+    updateGamePeriodSummary();
+    updateStep8Status();
+}
+
+function renderGamePeriodMarkers() {
+    const timeline = document.getElementById('gameTimeline');
+    if (!timeline) return;
+
+    timeline.querySelectorAll('.snippet-marker').forEach(el => el.remove());
+    const gameVideo = document.getElementById('gameTimePlayer');
+    const duration = gameVideo?.duration || videoDuration;
+
+    gamePeriods.forEach((period, index) => {
+        const startPercent = (period.start / duration) * 100;
+        const widthPercent = ((period.end - period.start) / duration) * 100;
+
+        const marker = document.createElement('div');
+        marker.className = 'snippet-marker';
+        marker.style.left = `${startPercent}%`;
+        marker.style.width = `${widthPercent}%`;
+        marker.style.backgroundColor = periodColors[index % periodColors.length];
+        marker.title = `Spielzeit ${index + 1}`;
+        marker.onclick = () => { if (gameVideo) gameVideo.currentTime = period.start; };
+        timeline.appendChild(marker);
+    });
+}
+
+function updateGamePeriodSummary() {
+    const totalDuration = gamePeriods.reduce((sum, p) => sum + (p.end - p.start), 0);
+    const chunks = Math.ceil(totalDuration / 60);  // 1-Minuten-Chunks
+
+    document.getElementById('totalGamePeriods').textContent = gamePeriods.length;
+    document.getElementById('totalGameDuration').textContent = formatTimeMins(totalDuration);
+    document.getElementById('totalChunks').textContent = chunks;
+}
+
+function updateStep8Status() {
+    const hasGamePeriods = gamePeriods.length > 0;
+    document.getElementById('step8-status').textContent = hasGamePeriods ? `${gamePeriods.length} Spielzeit(en)` : '';
+    document.getElementById('step8NextBtn').disabled = !hasGamePeriods;
+}
+
+async function saveGamePeriods() {
+    try {
+        await fetch(`/analysis/api/videos/${videoId}/game-periods`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({periods: gamePeriods})
+        });
+    } catch (e) {
+        console.error('Fehler beim Speichern der Spielzeiten:', e);
+    }
+}
+
+async function loadGamePeriods() {
+    try {
+        const response = await fetch(`/analysis/api/videos/${videoId}/game-periods`);
+        const data = await response.json();
+        if (data.periods) {
+            gamePeriods = data.periods;
+            renderGamePeriodList();
+        }
+    } catch (e) {
+        // Keine Spielzeiten vorhanden
+    }
+}
+
+// Event Listener für Step 8 Navigation
+document.getElementById('step8NextBtn')?.addEventListener('click', () => goToStep(9));
+
+// ========================================
+// STEP 9: CHUNK-BASIERTES TRACKING
+// ========================================
+
+let trackingChunks = [];  // Array von {start, end, status, progress}
+let isFullTrackingRunning = false;
+
+async function loadChunkStatus() {
+    try {
+        const response = await fetch(`/analysis/api/videos/${videoId}/analysis-chunks`);
+        const data = await response.json();
+        if (data.chunks && data.chunks.length > 0) {
+            trackingChunks = data.chunks.map(c => ({
+                id: c.chunk_index,
+                start: c.start_time,
+                end: c.end_time,
+                status: c.status,
+                progress: c.status === 'completed' ? 100 : 0,
+                frames_processed: c.frames_processed,
+                detections_count: c.detections_count,
+                processing_time: c.processing_time,
+                error: c.error_message
+            }));
+        }
+        // Performance-Statistiken aktualisieren
+        if (data.stats) {
+            updatePerformanceStats(data.stats);
+        }
+    } catch (e) {
+        console.log('Keine Chunks in DB gefunden');
+    }
+}
+
+function updatePerformanceStats(stats) {
+    const perfDiv = document.getElementById('performanceStats');
+    if (stats.completed_chunks > 0) {
+        perfDiv.classList.remove('hidden');
+        document.getElementById('statProcessingTime').textContent = formatDuration(stats.total_processing_time);
+        document.getElementById('statVideoTime').textContent = formatDuration(stats.total_video_time);
+
+        // Realtime-Faktor mit Farbe
+        const rtf = stats.avg_realtime_factor;
+        const rtfEl = document.getElementById('statRealtimeFactor');
+        rtfEl.textContent = rtf.toFixed(2) + 'x';
+        if (rtf >= 1) {
+            rtfEl.classList.add('text-green-600');
+            rtfEl.classList.remove('text-red-600', 'text-yellow-600');
+        } else if (rtf >= 0.5) {
+            rtfEl.classList.add('text-yellow-600');
+            rtfEl.classList.remove('text-green-600', 'text-red-600');
+        } else {
+            rtfEl.classList.add('text-red-600');
+            rtfEl.classList.remove('text-green-600', 'text-yellow-600');
+        }
+
+        document.getElementById('statSecondsPerSecond').textContent = stats.avg_seconds_per_video_second.toFixed(2) + 's';
+    }
+}
+
+function formatDuration(seconds) {
+    if (seconds < 60) return seconds.toFixed(1) + 's';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    if (mins < 60) return `${mins}m ${secs}s`;
+    const hours = Math.floor(mins / 60);
+    const remainMins = mins % 60;
+    return `${hours}h ${remainMins}m`;
+}
+
+async function renderChunkProgress() {
+    // Erst Chunk-Status aus DB laden
+    await loadChunkStatus();
+
+    // Falls keine Chunks in DB, aus Spielzeiten generieren
+    if (trackingChunks.length === 0) {
+        let chunkId = 0;
+        for (const period of gamePeriods) {
+            let start = period.start;
+            while (start < period.end) {
+                const end = Math.min(start + 60, period.end);
+                trackingChunks.push({
+                    id: chunkId++,
+                    periodStart: period.start,
+                    start: start,
+                    end: end,
+                    status: 'pending',
+                    progress: 0
+                });
+                start = end;
+            }
+        }
+    }
+
+    // Zusammenfassung aktualisieren
+    document.getElementById('analysisPeriodCount').textContent = gamePeriods.length;
+    const totalDuration = gamePeriods.reduce((sum, p) => sum + (p.end - p.start), 0);
+    document.getElementById('analysisTotalDuration').textContent = formatTimeMins(totalDuration);
+    document.getElementById('analysisChunkCount').textContent = trackingChunks.length;
+
+    // Modell laden - IMMER versuchen, das aktive Modell zu laden wenn keins gesetzt ist
+    await ensureModelLoaded();
+
+    // Modell-Anzeige aktualisieren
+    const modelDisplay = selectedModel ? selectedModel.split('/').pop() : 'Kein Modell!';
+    document.getElementById('analysisModelName').textContent = modelDisplay;
+
+    // Start-Button nur aktivieren wenn Modell vorhanden
+    const startBtn = document.getElementById('startFullAnalysisBtn');
+    if (!selectedModel) {
+        startBtn.disabled = true;
+        startBtn.title = 'Bitte zuerst ein Modell in Schritt 4 auswählen';
+        document.getElementById('analysisModelName').classList.add('text-red-500');
+    } else {
+        startBtn.disabled = false;
+        startBtn.title = '';
+        document.getElementById('analysisModelName').classList.remove('text-red-500');
+    }
+
+    // Chunk-Liste rendern
+    const container = document.getElementById('chunkProgressContainer');
+    container.innerHTML = trackingChunks.map((chunk, idx) => `
+        <div class="flex items-center gap-3 p-2 bg-white border rounded" id="chunk-${chunk.id}">
+            <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${getChunkStatusClass(chunk.status)}">
+                ${idx + 1}
+            </div>
+            <div class="flex-1">
+                <div class="flex justify-between text-sm">
+                    <span>${formatTime(chunk.start)} - ${formatTime(chunk.end)}</span>
+                    <span class="flex items-center gap-2">
+                        ${chunk.processing_time ? `<span class="text-xs text-blue-500">${chunk.processing_time.toFixed(1)}s</span>` : ''}
+                        <span id="chunk-status-${chunk.id}" class="text-gray-500">${getChunkStatusText(chunk.status)}</span>
+                    </span>
+                </div>
+                <div class="progress-bar mt-1 h-1">
+                    <div class="progress-bar-fill" id="chunk-progress-${chunk.id}" style="width: ${chunk.progress}%"></div>
+                </div>
+            </div>
+        </div>
+    `).join('');
+
+    document.getElementById('totalChunksDisplay').textContent = trackingChunks.length;
+    updateFullAnalysisProgress();
+}
+
+function getChunkStatusClass(status) {
+    switch (status) {
+        case 'completed': return 'bg-green-500 text-white';
+        case 'running': return 'bg-blue-500 text-white';
+        case 'error': return 'bg-red-500 text-white';
+        default: return 'bg-gray-200 text-gray-600';
+    }
+}
+
+function getChunkStatusText(status) {
+    switch (status) {
+        case 'completed': return 'Fertig';
+        case 'running': return 'Läuft...';
+        case 'error': return 'Fehler';
+        default: return 'Ausstehend';
+    }
+}
+
+function updateFullAnalysisProgress() {
+    const completed = trackingChunks.filter(c => c.status === 'completed').length;
+    const total = trackingChunks.length;
+    const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+    document.getElementById('completedChunks').textContent = completed;
+    document.getElementById('fullAnalysisPercent').textContent = `${percent}%`;
+    document.getElementById('fullAnalysisProgressFill').style.width = `${percent}%`;
+
+    // Step 9 Status
+    document.getElementById('step9-status').textContent = completed > 0 ? `${completed}/${total} Chunks` : '';
+}
+
+async function startFullAnalysis() {
+    if (isFullTrackingRunning) return;
+
+    // Sicherstellen dass ein Modell geladen ist
+    await ensureModelLoaded();
+    if (!selectedModel) {
+        alert('Kein Modell ausgewählt! Bitte wähle zuerst ein Modell in Schritt 4 aus.');
+        return;
+    }
+
+    // Sicherstellen dass ein Tracker konfiguriert ist
+    if (!selectedTrackerConfig) {
+        selectedTrackerConfig = trackerConfigs[selectedTracker] || trackerConfigs['bytetrack'];
+    }
+
+    isFullTrackingRunning = true;
+
+    const btn = document.getElementById('startFullAnalysisBtn');
+    btn.innerHTML = '<span class="animate-pulse">Tracking läuft...</span>';
+    btn.disabled = true;
+    document.getElementById('pauseAnalysisBtn').classList.remove('hidden');
+
+    // Finde ersten unvollständigen Chunk (pending oder error)
+    for (const chunk of trackingChunks) {
+        if (!isFullTrackingRunning) break;
+        if (chunk.status === 'completed') continue;
+        // Error-Chunks erneut versuchen
+        if (chunk.status === 'error') {
+            chunk.error = null;
+        }
+
+        chunk.status = 'running';
+        updateChunkDisplay(chunk);
+
+        try {
+            const tc = getTeamConfig();
+            const response = await fetch(`/analysis/api/videos/${videoId}/track-chunk`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    chunk_id: chunk.id,
+                    start: chunk.start,
+                    end: chunk.end,
+                    model_path: selectedModel,
+                    tracker_config: selectedTrackerConfig,
+                    conf_threshold: confThreshold,
+                    target_fps: trackingFps,
+                    team_config: tc
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.error) {
+                chunk.status = 'error';
+                document.getElementById('fullAnalysisDetail').textContent = `Fehler bei Chunk ${chunk.id + 1}: ${data.error}`;
+            } else {
+                chunk.status = 'completed';
+                chunk.progress = 100;
+                chunk.processing_time = data.processing_time;
+                // Zeige Info für diesen Chunk
+                const rtf = data.realtime_factor || 0;
+                document.getElementById('fullAnalysisDetail').textContent =
+                    `Chunk ${chunk.id + 1}: ${data.processing_time}s für ${data.chunk_duration}s Video (${rtf.toFixed(2)}x Echtzeit)`;
+            }
+        } catch (e) {
+            chunk.status = 'error';
+            document.getElementById('fullAnalysisDetail').textContent = `Fehler: ${e.message}`;
+        }
+
+        updateChunkDisplay(chunk);
+        updateFullAnalysisProgress();
+
+        // Statistiken nach jedem Chunk aktualisieren
+        await loadChunkStatus();
+    }
+
+    isFullTrackingRunning = false;
+    btn.innerHTML = `
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+        </svg>
+        Tracking fortsetzen
+    `;
+    btn.disabled = false;
+    document.getElementById('pauseAnalysisBtn').classList.add('hidden');
+
+    // Wenn alles fertig, zu Step 10
+    if (trackingChunks.every(c => c.status === 'completed')) {
+        document.getElementById('fullAnalysisDetail').textContent = 'Analyse abgeschlossen!';
+        setTimeout(() => goToStep(10), 1000);
+    }
+}
+
+function pauseFullAnalysis() {
+    isFullTrackingRunning = false;
+    document.getElementById('fullAnalysisDetail').textContent = 'Pausiert - Kann jederzeit fortgesetzt werden';
+}
+
+function updateChunkDisplay(chunk) {
+    const statusEl = document.getElementById(`chunk-status-${chunk.id}`);
+    const progressEl = document.getElementById(`chunk-progress-${chunk.id}`);
+    const containerEl = document.getElementById(`chunk-${chunk.id}`);
+
+    if (statusEl) statusEl.textContent = getChunkStatusText(chunk.status);
+    if (progressEl) progressEl.style.width = `${chunk.progress}%`;
+
+    // Status-Icon aktualisieren
+    const iconEl = containerEl?.querySelector('.rounded-full');
+    if (iconEl) {
+        iconEl.className = `w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${getChunkStatusClass(chunk.status)}`;
+    }
+}
+
+document.getElementById('startFullAnalysisBtn')?.addEventListener('click', startFullAnalysis);
+document.getElementById('pauseAnalysisBtn')?.addEventListener('click', pauseFullAnalysis);
+
+// ========================================
+// STEP 10: RESULTAT
+// ========================================
+
+let resultCalibrationId = null;
+
+function loadResultStats() {
+    // Statistiken laden (Platzhalter - muss mit echten Daten gefüllt werden)
+    const totalFrames = trackingChunks.length * trackingFps * 60;  // Schätzung
+    const totalDuration = gamePeriods.reduce((sum, p) => sum + (p.end - p.start), 0);
+
+    document.getElementById('statFrames').textContent = totalFrames.toLocaleString();
+    document.getElementById('statPlayers').textContent = '-';  // TODO: aus DB laden
+    document.getElementById('statTracks').textContent = '-';   // TODO: aus DB laden
+    document.getElementById('statDuration').textContent = formatTimeMins(totalDuration);
+
+    // Step 10 Status
+    const allCompleted = trackingChunks.every(c => c.status === 'completed');
+    document.getElementById('step10-status').textContent = allCompleted ? 'Bereit' : '';
+}
+
+function onResultCalibrationChange() {
+    resultCalibrationId = document.getElementById('resultCalibrationSelect').value;
+    const link = document.getElementById('fullTacticalLink');
+    if (link && resultCalibrationId) {
+        link.href = `/analysis/video/${videoId}/tactical-full?calibration_id=${resultCalibrationId}`;
+    }
+}
+
 // Initial render
 renderSnippetList();
 updateStepStatus();
+updateSectionStatus();
 loadBoundaryPolygon();
 
 // Prüfe ob bereits Snippets existieren und setze Step
@@ -1624,5 +2835,9 @@ if (snippets.length > 0) {
         goToStep(2);  // Extrahieren
     }
 }
+
+// Initial Sektionen-State
+updateSectionDisplay('vorbereitung');
+updateSectionDisplay('ganzesspiel');
 </script>
 {% endblock %}

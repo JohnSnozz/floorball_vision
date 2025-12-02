@@ -4,7 +4,13 @@
 
 {% block content %}
 <div class="container mx-auto px-4 py-8">
-    <h1 class="text-3xl font-bold mb-8">Label Studio Integration</h1>
+    <div class="flex items-center justify-between mb-8">
+        <h1 class="text-3xl font-bold">Label Studio Integration</h1>
+        <a href="{{ url_for('labeling.datasets') }}"
+           class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+            Datasets verwalten
+        </a>
+    </div>
 
     <!-- Status Banner -->
     <div id="ls-status" class="mb-6 p-4 rounded-lg {% if label_studio_status %}bg-green-100 text-green-800{% else %}bg-red-100 text-red-800{% endif %}">
@@ -94,17 +100,6 @@
         </div>
     </div>
 
-    <!-- Training Section -->
-    <div class="mt-8 bg-white rounded-lg shadow p-6">
-        <h2 class="text-xl font-semibold mb-4">YOLO Training</h2>
-        <p class="text-gray-500 mb-4">
-            Exportiere zuerst Labels aus einem Projekt, dann starte das Training.
-        </p>
-        <a href="{{ url_for('training.index') }}"
-           class="inline-block bg-orange-500 text-white py-2 px-4 rounded hover:bg-orange-600">
-            Zum Training →
-        </a>
-    </div>
 </div>
 
 <script>

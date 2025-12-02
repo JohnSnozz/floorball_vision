@@ -1,0 +1,23 @@
+# ByteTrack Konfiguration für Floorball Vision
+# Klassischer Tracking-Algorithmus basierend auf IoU und Kalman Filter
+# Docs: https://docs.ultralytics.com/modes/track/
+
+tracker_type: bytetrack
+
+# === Matching Thresholds ===
+# Höhere Werte = strengeres Matching, weniger falsche Zuordnungen
+# Niedrigere Werte = mehr Tracks werden gehalten, aber mehr ID-Switches möglich
+
+track_high_thresh: 0.25  # Erste Matching-Stufe: Detektionen mit hohem Score
+track_low_thresh: 0.1    # Zweite Stufe: Auch schwache Detektionen matchen
+new_track_thresh: 0.25   # Neuen Track starten wenn kein Match gefunden
+match_thresh: 0.8        # IoU-Schwellwert für Track-Zuordnung
+
+# === Track Buffer ===
+# Wie lange ein "verlorener" Track im Speicher bleibt (Frames)
+# Höher = besser bei Verdeckungen, aber mehr Risiko für ID-Switches
+track_buffer: 30
+
+# === Score Fusion ===
+# Kombiniert Detection-Score mit Motion/IoU für stabileres Matching
+fuse_score: True

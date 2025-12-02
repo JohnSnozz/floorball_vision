@@ -1,0 +1,31 @@
+# BoT-SORT Konfiguration für Floorball Vision
+# Erweiterter Tracker mit Global Motion Compensation und optionalem Re-ID
+# Docs: https://docs.ultralytics.com/modes/track/
+
+tracker_type: botsort
+
+# === Matching Thresholds ===
+track_high_thresh: 0.25
+track_low_thresh: 0.1
+new_track_thresh: 0.25
+match_thresh: 0.8
+track_buffer: 30
+fuse_score: True
+
+# === BoT-SORT Spezifisch ===
+
+# Global Motion Compensation (GMC)
+# Kompensiert Kamerabewegung für besseres Tracking
+# sparseOptFlow: Schnell, gut für stationäre/leicht bewegte Kamera
+# orb: Robuster bei starker Bewegung, aber langsamer
+# none: Deaktiviert (schnellste Option)
+gmc_method: sparseOptFlow
+
+# === Re-ID (Re-Identification) ===
+# Verwendet Appearance-Features um Spieler nach Verdeckung wiederzufinden
+# ACHTUNG: Benötigt mehr GPU-Speicher und ist langsamer
+
+with_reid: False         # Re-ID aktivieren (True/False)
+proximity_thresh: 0.5    # Min IoU für Re-ID Kandidaten
+appearance_thresh: 0.8   # Min Ähnlichkeit für Re-ID Match
+model: auto              # Re-ID Modell: "auto" nutzt Detector-Features

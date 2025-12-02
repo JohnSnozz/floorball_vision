@@ -17,6 +17,9 @@ basketball/
 # Alle Daten (Videos, Frames, Exports, Cache)
 data/
 
+# Backups
+backups/
+
 # ML Modelle (.pt Dateien sind gross)
 models/
 *.pt
