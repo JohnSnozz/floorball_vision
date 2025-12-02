@@ -152,6 +152,55 @@ def tactical_view(video_id, snippet_id):
     )
 
 
+@analysis_bp.route("/video/<video_id>/tactical-full")
+def tactical_view_full(video_id):
+    """Taktische Ansicht für die volle Spielanalyse (alle Chunks)."""
+    video = db.session.get(Video, video_id)
+    if not video:
+        abort(404)
+
+    # Kalibrierung laden
+    calibration_id = request.args.get("calibration_id")
+    calibration = None
+    if calibration_id:
+        calibration = db.session.get(Calibration, calibration_id)
+    else:
+        calibration = db.session.query(Calibration).filter_by(
+            video_id=video.id,
+            is_active=True
+        ).first()
+
+    # Spielzeiten laden
+    periods = db.session.query(GamePeriod).filter_by(
+        video_id=video.id
+    ).order_by(GamePeriod.period_index).all()
+
+    # Chunks laden
+    chunks = db.session.query(AnalysisChunk).filter_by(
+        video_id=video.id,
+        status="completed"
+    ).order_by(AnalysisChunk.chunk_index).all()
+
+    # Gesamtdauer berechnen
+    total_duration = sum(p.end_time - p.start_time for p in periods)
+
+    team_config = {
+        "team1": {"displayColor": "#3B82F6"},
+        "team2": {"displayColor": "#FFFFFF"},
+        "referee": {"displayColor": "#EC4899"}
+    }
+
+    return render_template(
+        "analysis/tactical_full.html",
+        video=video,
+        calibration=calibration,
+        periods=periods,
+        chunks=chunks,
+        total_duration=total_duration,
+        team_config=team_config
+    )
+
+
 # === API Endpoints - Snippets ===
 
 @analysis_bp.route("/api/videos/<video_id>/snippets", methods=["GET"])
@@ -898,6 +947,10 @@ def track_chunk(video_id):
     conf_threshold = data.get("conf_threshold", 0.5)
     target_fps = data.get("target_fps", 5)
     team_config = data.get("team_config", {})
+    enable_team_assign = data.get("enable_team_assign", True)
+    enable_jersey_ocr = data.get("enable_jersey_ocr", False)
+    team_assign_interval = data.get("team_assign_interval", 10.0)
+    jersey_ocr_interval = data.get("jersey_ocr_interval", 5.0)
 
     # Chunk in DB suchen oder erstellen
     chunk = db.session.query(AnalysisChunk).filter_by(
@@ -953,18 +1006,41 @@ def track_chunk(video_id):
             conf_threshold=conf_threshold
         )
 
+        # TeamAssigner und JerseyOCR initialisieren
+        team_assigner = None
+        if enable_team_assign:
+            team_assigner = TeamAssigner(team_config=team_config)
+            if not team_assigner.is_available:
+                print("Warning: CLIP model not available for team assignment")
+                team_assigner = None
+
+        jersey_detector = None
+        if enable_jersey_ocr:
+            jersey_detector = JerseyOCR()
+            if not jersey_detector.is_available:
+                print("Warning: OCR not available for jersey detection")
+                jersey_detector = None
+
+        # Spielfeld-Polygon laden (für Filterung)
+        field_polygon = _load_field_polygon(video_id, video.id)
+
         # Frame-Bereich berechnen
         fps = video.fps or 25
         start_frame = int(start_time * fps)
         end_frame = int(end_time * fps)
         frame_step = max(1, int(fps / target_fps))
 
-        # Tracking durchführen
+        # Tracking durchführen mit Team-Zuweisung und Jersey-OCR
         results = tracker.track_video_segment(
             video_path=str(video_path),
             start_frame=start_frame,
             end_frame=end_frame,
-            frame_step=frame_step
+            frame_step=frame_step,
+            field_polygon=field_polygon,
+            team_assigner=team_assigner,
+            jersey_detector=jersey_detector,
+            team_assign_interval=team_assign_interval,
+            jersey_ocr_interval=jersey_ocr_interval
         )
 
         # Ergebnisse verarbeiten
@@ -973,18 +1049,6 @@ def track_chunk(video_id):
             len(f.get("detections", []))
             for f in results.get("frames", [])
         )
-
-        # Team-Zuweisung wenn konfiguriert
-        if team_config.get("team1_color") or team_config.get("team2_color"):
-            team_assigner = TeamAssigner()
-            for frame_data in results.get("frames", []):
-                for det in frame_data.get("detections", []):
-                    if det.get("class_name") == "player":
-                        # Team anhand der Farbe zuweisen
-                        det["team"] = team_assigner.assign_team_by_color(
-                            det.get("crop_rgb"),
-                            team_config
-                        )
 
         # Ergebnisse in JSON-Datei speichern
         chunk_dir = PROJECT_ROOT / "data" / "analysis" / "chunks" / str(video.id)
@@ -1039,6 +1103,58 @@ def track_chunk(video_id):
             "error": str(e),
             "chunk_id": chunk_id
         }), 500
+
+
+@analysis_bp.route("/api/videos/<video_id>/chunk-positions/<int:chunk_index>")
+def get_chunk_positions(video_id, chunk_index):
+    """Tracking-Daten für einen einzelnen Chunk abrufen."""
+    video = db.session.get(Video, video_id)
+    if not video:
+        return jsonify({"error": "Video nicht gefunden"}), 404
+
+    # Chunk-Datei laden
+    chunk_file = PROJECT_ROOT / "data" / "analysis" / "chunks" / str(video.id) / f"chunk_{chunk_index:04d}.json"
+
+    if not chunk_file.exists():
+        return jsonify({"error": f"Chunk {chunk_index} nicht gefunden"}), 404
+
+    try:
+        with open(chunk_file, "r") as f:
+            chunk_data = json.load(f)
+
+        # Ergebnisse aufbereiten
+        frames = []
+        results = chunk_data.get("results", {})
+
+        for frame in results.get("frames", []):
+            frame_data = {
+                "frame_idx": frame.get("frame_idx"),
+                "timestamp": frame.get("timestamp", 0) - chunk_data.get("start_time", 0),
+                "detections": []
+            }
+
+            for det in frame.get("detections", []):
+                frame_data["detections"].append({
+                    "track_id": det.get("track_id"),
+                    "bbox": det.get("bbox"),
+                    "confidence": det.get("confidence"),
+                    "class_name": det.get("class_name"),
+                    "team": det.get("team"),
+                    "field_x": det.get("center", [None, None])[0] if det.get("center") else None,
+                    "field_y": det.get("center", [None, None])[1] if det.get("center") else None
+                })
+
+            frames.append(frame_data)
+
+        return jsonify({
+            "chunk_index": chunk_index,
+            "start_time": chunk_data.get("start_time"),
+            "end_time": chunk_data.get("end_time"),
+            "frames": frames
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @analysis_bp.route("/api/videos/<video_id>/chunks", methods=["GET"])

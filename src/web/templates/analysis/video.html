@@ -817,6 +817,41 @@
                             <span id="analysisModelName" class="font-mono ml-2 text-blue-600">-</span>
                         </div>
                     </div>
+                    <!-- Zweite Zeile: Tracking-Einstellungen (editierbar) -->
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-3 pt-3 border-t border-gray-200">
+                        <div>
+                            <label class="text-gray-600 block mb-1">Tracking FPS:</label>
+                            <input type="number" id="analysisTrackingFps" min="1" max="30" value="2"
+                                   class="w-20 border rounded px-2 py-1 text-sm font-mono" onchange="updateFullTrackingSettings()">
+                        </div>
+                        <div>
+                            <label class="text-gray-600 block mb-1">Confidence:</label>
+                            <input type="number" id="analysisConfidence" min="0.1" max="0.9" step="0.05" value="0.3"
+                                   class="w-20 border rounded px-2 py-1 text-sm font-mono" onchange="updateFullTrackingSettings()">
+                        </div>
+                        <div>
+                            <label class="text-gray-600 block mb-1">Team-Zuweisung:</label>
+                            <div class="flex items-center gap-2">
+                                <input type="checkbox" id="analysisEnableTeamAssign" checked
+                                       class="form-checkbox h-4 w-4 text-blue-600" onchange="updateFullTrackingSettings()">
+                                <span class="text-xs text-gray-500">alle</span>
+                                <input type="number" id="analysisTeamAssignInterval" min="1" max="60" value="10"
+                                       class="w-14 border rounded px-2 py-1 text-sm font-mono" onchange="updateFullTrackingSettings()">
+                                <span class="text-xs text-gray-500">s</span>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="text-gray-600 block mb-1">Rückennummer:</label>
+                            <div class="flex items-center gap-2">
+                                <input type="checkbox" id="analysisEnableJerseyOcr"
+                                       class="form-checkbox h-4 w-4 text-blue-600" onchange="updateFullTrackingSettings()">
+                                <span class="text-xs text-gray-500">alle</span>
+                                <input type="number" id="analysisJerseyOcrInterval" min="1" max="60" value="5"
+                                       class="w-14 border rounded px-2 py-1 text-sm font-mono" onchange="updateFullTrackingSettings()">
+                                <span class="text-xs text-gray-500">s</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Chunk-Liste mit Fortschritt -->
@@ -875,6 +910,12 @@
                         &larr; Zurück
                     </button>
                     <div class="flex gap-2">
+                        <button id="resetTrackingBtn" class="hidden bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg flex items-center gap-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                            </svg>
+                            Erneut ausführen
+                        </button>
                         <button id="pauseAnalysisBtn" class="hidden bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg">
                             Pausieren
                         </button>
@@ -2568,11 +2609,16 @@ function formatDuration(seconds) {
 }
 
 async function renderChunkProgress() {
-    // Erst Chunk-Status aus DB laden
+    // Erst Spielzeiten aus DB laden falls noch nicht vorhanden
+    if (gamePeriods.length === 0) {
+        await loadGamePeriods();
+    }
+
+    // Dann Chunk-Status aus DB laden
     await loadChunkStatus();
 
     // Falls keine Chunks in DB, aus Spielzeiten generieren
-    if (trackingChunks.length === 0) {
+    if (trackingChunks.length === 0 && gamePeriods.length > 0) {
         let chunkId = 0;
         for (const period of gamePeriods) {
             let start = period.start;
@@ -2604,6 +2650,14 @@ async function renderChunkProgress() {
     const modelDisplay = selectedModel ? selectedModel.split('/').pop() : 'Kein Modell!';
     document.getElementById('analysisModelName').textContent = modelDisplay;
 
+    // Tracking-Einstellungen in Inputs setzen (Werte aus Step 4/Test übernehmen)
+    document.getElementById('analysisTrackingFps').value = trackingFps;
+    document.getElementById('analysisConfidence').value = confThreshold;
+    document.getElementById('analysisEnableTeamAssign').checked = enableTeamAssign;
+    document.getElementById('analysisTeamAssignInterval').value = teamAssignInterval;
+    document.getElementById('analysisEnableJerseyOcr').checked = enableJerseyOcr;
+    document.getElementById('analysisJerseyOcrInterval').value = jerseyOcrInterval;
+
     // Start-Button nur aktivieren wenn Modell vorhanden
     const startBtn = document.getElementById('startFullAnalysisBtn');
     if (!selectedModel) {
@@ -2614,6 +2668,15 @@ async function renderChunkProgress() {
         startBtn.disabled = false;
         startBtn.title = '';
         document.getElementById('analysisModelName').classList.remove('text-red-500');
+    }
+
+    // "Erneut ausführen" Button anzeigen wenn Chunks bereits abgeschlossen sind
+    const hasCompletedChunks = trackingChunks.some(c => c.status === 'completed');
+    const resetBtn = document.getElementById('resetTrackingBtn');
+    if (hasCompletedChunks) {
+        resetBtn.classList.remove('hidden');
+    } else {
+        resetBtn.classList.add('hidden');
     }
 
     // Chunk-Liste rendern
@@ -2673,6 +2736,31 @@ function updateFullAnalysisProgress() {
     document.getElementById('step9-status').textContent = completed > 0 ? `${completed}/${total} Chunks` : '';
 }
 
+// Aktualisiert die globalen Tracking-Variablen aus den Step 9 Inputs
+function updateFullTrackingSettings() {
+    trackingFps = parseInt(document.getElementById('analysisTrackingFps').value) || 2;
+    confThreshold = parseFloat(document.getElementById('analysisConfidence').value) || 0.3;
+    enableTeamAssign = document.getElementById('analysisEnableTeamAssign').checked;
+    teamAssignInterval = parseInt(document.getElementById('analysisTeamAssignInterval').value) || 10;
+    enableJerseyOcr = document.getElementById('analysisEnableJerseyOcr').checked;
+    jerseyOcrInterval = parseInt(document.getElementById('analysisJerseyOcrInterval').value) || 5;
+
+    // Auch in Step 4 Inputs synchronisieren falls vorhanden
+    const step4Fps = document.getElementById('trackingFps');
+    const step4Conf = document.getElementById('confThreshold');
+    const step4TeamAssign = document.getElementById('enableTeamAssign');
+    const step4TeamInterval = document.getElementById('teamAssignInterval');
+    const step4JerseyOcr = document.getElementById('enableJerseyOcr');
+    const step4JerseyInterval = document.getElementById('jerseyOcrInterval');
+
+    if (step4Fps) step4Fps.value = trackingFps;
+    if (step4Conf) step4Conf.value = confThreshold;
+    if (step4TeamAssign) step4TeamAssign.checked = enableTeamAssign;
+    if (step4TeamInterval) step4TeamInterval.value = teamAssignInterval;
+    if (step4JerseyOcr) step4JerseyOcr.checked = enableJerseyOcr;
+    if (step4JerseyInterval) step4JerseyInterval.value = jerseyOcrInterval;
+}
+
 async function startFullAnalysis() {
     if (isFullTrackingRunning) return;
 
@@ -2720,7 +2808,11 @@ async function startFullAnalysis() {
                     tracker_config: selectedTrackerConfig,
                     conf_threshold: confThreshold,
                     target_fps: trackingFps,
-                    team_config: tc
+                    team_config: tc,
+                    enable_team_assign: enableTeamAssign,
+                    enable_jersey_ocr: enableJerseyOcr,
+                    team_assign_interval: teamAssignInterval,
+                    jersey_ocr_interval: jerseyOcrInterval
                 })
             });
 
@@ -2789,6 +2881,69 @@ function updateChunkDisplay(chunk) {
 
 document.getElementById('startFullAnalysisBtn')?.addEventListener('click', startFullAnalysis);
 document.getElementById('pauseAnalysisBtn')?.addEventListener('click', pauseFullAnalysis);
+
+async function resetAndRerunTracking() {
+    if (isFullTrackingRunning) return;
+
+    if (!confirm('Alle bisherigen Tracking-Daten werden gelöscht und das Tracking wird mit den aktuellen Einstellungen neu ausgeführt. Fortfahren?')) {
+        return;
+    }
+
+    // Reset-Button deaktivieren während dem Reset
+    const resetBtn = document.getElementById('resetTrackingBtn');
+    resetBtn.disabled = true;
+    resetBtn.innerHTML = '<span class="animate-pulse">Zurücksetzen...</span>';
+
+    try {
+        // API aufrufen um alle Chunks in DB zurückzusetzen
+        const response = await fetch(`/analysis/api/videos/${videoId}/analysis-chunks/reset`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        });
+
+        if (!response.ok) {
+            throw new Error('Fehler beim Zurücksetzen der Chunks');
+        }
+
+        // Lokale Chunk-Liste zurücksetzen
+        trackingChunks.forEach(chunk => {
+            chunk.status = 'pending';
+            chunk.progress = 0;
+            chunk.processing_time = null;
+            chunk.error = null;
+        });
+
+        // UI aktualisieren
+        await renderChunkProgress();
+
+        // Reset-Button wieder aktivieren
+        resetBtn.disabled = false;
+        resetBtn.innerHTML = `
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            Erneut ausführen
+        `;
+
+        // Performance-Stats ausblenden
+        document.getElementById('performanceStats').classList.add('hidden');
+
+        // Direkt Tracking starten
+        await startFullAnalysis();
+
+    } catch (e) {
+        alert('Fehler beim Zurücksetzen: ' + e.message);
+        resetBtn.disabled = false;
+        resetBtn.innerHTML = `
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            Erneut ausführen
+        `;
+    }
+}
+
+document.getElementById('resetTrackingBtn')?.addEventListener('click', resetAndRerunTracking);
 
 // ========================================
 // STEP 10: RESULTAT

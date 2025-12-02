@@ -311,7 +311,11 @@ class YOLOTracker:
         start_frame: int = 0,
         end_frame: int = -1,
         frame_step: int = 1,
-        field_polygon: Optional[List[List[float]]] = None
+        field_polygon: Optional[List[List[float]]] = None,
+        team_assigner: Optional[Any] = None,
+        jersey_detector: Optional[Any] = None,
+        team_assign_interval: float = 10.0,
+        jersey_ocr_interval: float = 5.0
     ) -> Dict[str, Any]:
         """
         Führt Tracking über ein Video-Segment aus.
@@ -322,6 +326,10 @@ class YOLOTracker:
             end_frame: End-Frame (exklusive), -1 = bis Ende
             frame_step: Nur jeden n-ten Frame verarbeiten
             field_polygon: Spielfeld-Polygon für Filterung
+            team_assigner: TeamAssigner-Instanz für Team-Zuweisung
+            jersey_detector: JerseyOCR-Instanz für Rückennummern
+            team_assign_interval: Sekunden zwischen Team-Assignments pro Track
+            jersey_ocr_interval: Sekunden zwischen OCR-Versuchen pro Track
 
         Returns:
             Dict mit Tracking-Ergebnissen
@@ -335,6 +343,14 @@ class YOLOTracker:
 
         # Zum Start-Frame springen
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+        # Voting-Strukturen für stabile Zuweisungen
+        track_team_votes: Dict[int, Dict[str, int]] = {}
+        track_number_votes: Dict[int, Dict[int, List[Dict]]] = {}
+
+        # Zeit-basiertes Tracking für Team/Jersey
+        track_last_team_assign: Dict[int, float] = {}
+        track_last_jersey_ocr: Dict[int, float] = {}
 
         results = {
             "video_fps": video_fps,
@@ -394,17 +410,65 @@ class YOLOTracker:
                     cy_foot = y2  # Fuß-Position
 
                     # Polygon-Filter
-                    if field_polygon and not point_in_polygon(cx, cy_foot, field_polygon):
-                        continue
+                    in_field = True
+                    if field_polygon:
+                        in_field = point_in_polygon(cx, cy_foot, field_polygon)
+                        if not in_field:
+                            continue
+
+                    bbox = [float(x1), float(y1), float(x2), float(y2)]
 
                     detection = {
-                        "bbox": [float(x1), float(y1), float(x2), float(y2)],
+                        "bbox": bbox,
                         "confidence": conf,
                         "class_id": cls_id,
                         "class_name": class_name,
                         "track_id": track_id,
-                        "center": [float(cx), float(cy_foot)]
+                        "center": [float(cx), float(cy_foot)],
+                        "in_field": in_field
                     }
+
+                    # Team-Zuweisung (zeitbasiert)
+                    if in_field and track_id is not None and team_assigner:
+                        last_assign = track_last_team_assign.get(track_id, -float('inf'))
+                        if (current_timestamp - last_assign) >= team_assign_interval:
+                            try:
+                                team, team_conf = team_assigner.assign_team(frame, bbox)
+                                detection["team"] = team
+                                detection["team_conf"] = team_conf
+                                track_last_team_assign[track_id] = current_timestamp
+
+                                # Votes akkumulieren
+                                if track_id not in track_team_votes:
+                                    track_team_votes[track_id] = {"team1": 0, "team2": 0, "referee": 0}
+                                if team in track_team_votes[track_id]:
+                                    track_team_votes[track_id][team] += 1
+                            except Exception as e:
+                                print(f"Team assignment error: {e}")
+
+                    # Jersey-Nummer (zeitbasiert)
+                    if in_field and track_id is not None and jersey_detector:
+                        last_ocr = track_last_jersey_ocr.get(track_id, -float('inf'))
+                        if (current_timestamp - last_ocr) >= jersey_ocr_interval:
+                            try:
+                                jersey_num, num_conf = jersey_detector.detect(frame, bbox)
+                                track_last_jersey_ocr[track_id] = current_timestamp
+                                if jersey_num is not None and num_conf > 0.3:
+                                    detection["jersey_number"] = jersey_num
+                                    detection["jersey_conf"] = num_conf
+
+                                    # Number votes akkumulieren
+                                    if track_id not in track_number_votes:
+                                        track_number_votes[track_id] = {}
+                                    if jersey_num not in track_number_votes[track_id]:
+                                        track_number_votes[track_id][jersey_num] = []
+                                    track_number_votes[track_id][jersey_num].append({
+                                        "conf": num_conf,
+                                        "frame_idx": frame_idx
+                                    })
+                            except Exception as e:
+                                print(f"Jersey detection error: {e}")
+
                     frame_detections.append(detection)
 
             results["frames"].append({
@@ -419,4 +483,11 @@ class YOLOTracker:
         cap.release()
 
         results["tracked_frames"] = tracked_count
+
+        # Finale Team-Zuweisungen
+        results["track_team_assignments"] = self._compute_final_team_assignments(track_team_votes)
+
+        # Finale Jersey-Nummern
+        results["track_jersey_numbers"] = self._compute_final_jersey_numbers(track_number_votes)
+
         return results
